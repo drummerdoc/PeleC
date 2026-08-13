@@ -41,7 +41,14 @@ Navier-Stokes Characteristic Boundary Conditions
 
 .. warning::
 
-   This following is currently deprecated as the GS-NSCBC boundary condition has not been ported from Fortran to C++.
+   **The GC-NSCBC boundary condition is not available in the C++ version of PeleC.** It was removed along with
+   the rest of the Fortran source. The description below documents the Fortran API for historical reference and
+   because it is the only surviving statement of the intended user-facing semantics; none of it can be called today.
+   The input parameters ``pelec.nscbc_adv`` and ``pelec.nscbc_diff`` were declared but never read by any live code
+   path, and have been **removed** — ``nscbc_adv`` defaulted to ``true``, so leaving a dead parameter with an
+   "on" default in place would have made any future reconnection silently change the behaviour of every
+   ``Hard``/``UserBC`` case that did not explicitly opt out. PeleC now aborts if either key appears in an inputs
+   file. Until a C++ implementation lands, use the subsonic inflow/outflow guidance given above.
 
 A well-known approach to the subsonic problem is the Navier-Stokes Characteristic Boundary Conditions
 (NSCBC) strategy, and is described in the paper `Poinsot and Lele (1992) JCP
@@ -113,7 +120,7 @@ In PeleC, the subroutine ``bcnormal`` is used to provide the target state for th
     endif
 
 
-When ``bc_type``, ``bc_params`` and ``bc_target`` parameters are present, the routine is likely being called from ``impose_NSCBC_(dir)d.F90``. In this case the flag ``flag_nscbc`` is activated to fill optional arrays with the requisite data. Note however that the ``FillPatch`` operation called in the AMReX framework also calls ``pc_hypfill``, which then also calls ``bcnormal``.  In this case, the GC-NSCBC parameters are not directly relevant. In order to make ``bc_normal`` sufficiently generic for both purposes, only the target state is returned to ``pc_hypfill`` and the parameters associated to the GC-NSCBC method are ignored. By default, the GC-NSCBC method is activated for all subsonic flow boundaries. It can be turned off by setting the flags ``nscbc_adv`` and ``nscbc_diff`` to zero. In that case, the ghost-cells will be filled directly with the target state (although, as mentioned, this will likely lead to undesired behavior in the solution!).
+When ``bc_type``, ``bc_params`` and ``bc_target`` parameters are present, the routine is likely being called from ``impose_NSCBC_(dir)d.F90``. In this case the flag ``flag_nscbc`` is activated to fill optional arrays with the requisite data. Note however that the ``FillPatch`` operation called in the AMReX framework also calls ``pc_hypfill``, which then also calls ``bcnormal``.  In this case, the GC-NSCBC parameters are not directly relevant. In order to make ``bc_normal`` sufficiently generic for both purposes, only the target state is returned to ``pc_hypfill`` and the parameters associated to the GC-NSCBC method are ignored. In the Fortran version, the GC-NSCBC method was activated by default for all subsonic flow boundaries, and could be turned off by setting the flags ``nscbc_adv`` and ``nscbc_diff`` to zero, in which case the ghost-cells were filled directly with the target state (which, as mentioned, will likely lead to undesired behavior in the solution!). **Those flags no longer exist**; see the warning above.
 
 
 The use of ``bc_type``, ``bc_params`` and ``bc_target`` will be described in detail in other sections of this documentation, but let us focus here on the parameter, ``bc_type``. The ``bc_type`` (an integer) is a coded form of the physical boundary condition that we want to impose, and this is done point-wise. This means that along a face of the domain, different physical boundary conditions

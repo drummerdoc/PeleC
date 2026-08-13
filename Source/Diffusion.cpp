@@ -143,39 +143,12 @@ PeleC::getMOLSrcTerm(
             }
           });
       }
-      // TODO deal with NSCBC
-      /*
-         for (int dir = 0; dir < AMREX_SPACEDIM ; dir++)  {
-         const amrex::Box& bxtmp = amrex::surroundingNodes(vbox,dir);
-         amrex::Box TestBox(bxtmp);
-         for(int d=0; d<AMREX_SPACEDIM; ++d) {
-         if (dir!=d) TestBox.grow(d,1);
-         }
-
-         bcMask[dir].resize(TestBox,1, amrex::The_Async_Arena());
-         bcMask[dir].setVal(0);
-         }
-
-      // Because bcMask is read in the Riemann solver in any case,
-      // here we put physbc values in the appropriate faces for the
-      non-nscbc case set_bc_mask(lo, hi, domain_lo, domain_hi,
-      AMREX_D_DECL(AMREX_TO_FORTRAN(bcMask[0]),
-      AMREX_TO_FORTRAN(bcMask[1]),
-      AMREX_TO_FORTRAN(bcMask[2])));
-
-      if (nscbc_diff == 1)
-      {
-      impose_NSCBC(lo, hi, domain_lo, domain_hi,
-      AMREX_TO_FORTRAN(Sfab),
-      AMREX_TO_FORTRAN(q.fab()),
-      AMREX_TO_FORTRAN(qaux.fab()),
-      AMREX_D_DECL(AMREX_TO_FORTRAN(bcMask[0]),
-      AMREX_TO_FORTRAN(bcMask[1]),
-      AMREX_TO_FORTRAN(bcMask[2])),
-      &flag_nscbc_isAnyPerio, flag_nscbc_perio,
-      &time, dx, &dt);
-      }
-      */
+      // Phase-2 NSCBC hook point for the diffusive (viscous) LODI terms; see
+      // the corresponding note in Hydro.cpp.  Note that the viscous operator
+      // below consumes the *entire* ghost region including transverse corner
+      // ghosts (pc_diffusion_flux forms transverse gradients from a four-point
+      // average straddling j+-1/k+-1), so any boundary treatment must produce
+      // sensible values in all numGrow() layers, not just the first.
 
       // Compute transport coefficients, coincident with Q
       auto const& coe_cc = coeff_cc.array();
