@@ -59,10 +59,55 @@ provide it is unaffected. A face must be ``Hard`` or ``UserBC`` for the treatmen
 
 .. note::
 
-   The current implementation is the **1-D-normal LODI limit**: the modelled incoming waves carry no transverse
-   terms and no reaction- or viscous-source correction (Motheau's :math:`\beta = 1`). It is well suited to
-   boundaries placed away from flames, shear layers and composition fronts, and it is not a substitute for placing
-   them there. See *Where to put the boundary* below.
+   By default (``bc_nscbc_beta = 1``) the implementation is the **1-D-normal LODI limit**: the modelled incoming
+   waves carry no transverse terms. Setting :math:`\beta < 1` enables them and is worth a factor of a few whenever
+   the boundary is met obliquely — see *Transverse terms* below. The reaction- and viscous-source corrections are
+   not available at all, because they need data that does not exist during ``FillPatch``; place an outflow away
+   from flames regardless. See *Where to put the boundary*.
+
+Transverse terms
+""""""""""""""""""""
+
+The 1-D characteristic decomposition assumes the wave meets the boundary head-on. When it does not, the
+decomposition attributes part of a purely *outgoing* wave to the incoming characteristic, and the boundary then
+reflects it. The transverse terms correct for that:
+
+.. math::
+
+   L_{\rm in} = K (\phi - \phi_{\rm target}) - (1 - \beta) \, T_{\rm transverse}
+
+For a plane wave at angle :math:`\theta` to the boundary normal the correction that exactly cancels the
+obliqueness error works out to :math:`(1-\beta) = \cos\theta / (1 + \cos\theta)`, so
+
+.. math::
+
+   \beta_{\rm opt} = 1 - \frac{\cos\theta}{1 + \cos\theta}
+
+which is **0.5 at normal incidence** and rises toward 1 as the wave becomes grazing (0.67 at 60°, 0.79 at 75°).
+Both measured optima in ``Exec/RegTests/NSCBC-COVO`` land on that curve.
+
+.. table::
+
+   ==========================  ==========================  =============================
+   :math:`\beta`               convected vortex, rms        circular pulse, front
+                               residual vs no-boundary      amplitude spread
+   ==========================  ==========================  =============================
+   hard boundary               14.0×                        21.4%
+   1.0 (transverse off)        10.0×                        0.90%
+   0.8                         7.3×                         **0.066%**
+   0.5                         **3.8×**                     1.08%
+   0.2 (= local Mach)          16.1×                        —
+   0.0 (full)                  132×                         2.95%
+   ==========================  ==========================  =============================
+
+Note the shape of that curve: too little correction costs a factor of a few, **too much is catastrophic**.
+:math:`\beta` below about 0.3 is worse than having no transverse terms at all, and :math:`\beta = 0` is close to
+unstable. That asymmetry is why the default is 1 rather than the optimum — a wrong :math:`\beta` is far more
+dangerous than an absent one. Start at 0.5 and raise it toward 1 if the boundary is mostly met at grazing
+incidence.
+
+A negative :math:`\beta` selects the local Mach number, which is the legacy Fortran's convention. The measurements
+do not support it: at M = 0.2 it gives :math:`\beta = 0.2`, on the wrong side of the minimum.
 
 What is specified, and what is not
 """"""""""""""""""""""""""""""""""
@@ -98,6 +143,7 @@ needs to be changed.
    ``pelec.bc_nscbc_sigma``            0.25       Outflow pressure relaxation (Poinsot-Lele :math:`\sigma`).
    ``pelec.bc_nscbc_relax_u``          2.0        Inflow normal-velocity relaxation.
    ``pelec.bc_nscbc_relax_t``          0.2        Inflow temperature and tangential-velocity relaxation.
+   ``pelec.bc_nscbc_beta``             1.0        Transverse-term weight. 1 = off; **try 0.5**.
    ``pelec.bc_nscbc_order``            2          Extrapolation order, 1 or 2. Verification knob only.
    ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
    ==================================  =========  ==========================================================

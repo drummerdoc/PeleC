@@ -84,7 +84,12 @@ def circularity(p_amb, c, files, ntheta=720):
             continue
         th = theta[keep]
         # Scan each retained ray for the front.
-        rr = np.linspace(0.55 * r_th, 1.45 * r_th, 400)
+        # The radial scan must be finer than the effect being measured: at 400
+        # samples one increment is ~0.2 % of r_th, which quantises the radius
+        # spread and makes two genuinely different boundaries report the same
+        # number.  2400 puts the quantisation an order of magnitude below the
+        # grid spacing.
+        rr = np.linspace(0.55 * r_th, 1.45 * r_th, 2400)
         R, TH = np.meshgrid(rr, th, indexing="ij")
         vals = bilinear(x, y, dp, R * np.cos(TH), R * np.sin(TH))
         k = np.argmax(np.abs(vals), axis=0)

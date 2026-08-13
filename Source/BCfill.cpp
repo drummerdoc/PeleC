@@ -148,10 +148,44 @@ struct PCHypFillExtDir
         continue; // this face is not characteristic here; try the next
       }
 
+      // Tangential neighbours of the boundary cell, for the transverse terms.
+      // Indices are clamped into the domain AND into this FAB, so only
+      // interior cells are read; at a corner the clamp collapses the stencil
+      // and inv_dt falls to a one-sided spacing, or to zero if both
+      // neighbours land on the same cell.  Nothing here reads a ghost cell,
+      // so the fill remains order-independent.
+      pc_nscbc::Transverse tr;
+      amrex::Real s_tm[AMREX_SPACEDIM][NVAR], s_tp[AMREX_SPACEDIM][NVAR];
+      if (m_nscbc_prm[idir].beta < 1.0) {
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+          if (d == idir) {
+            continue;
+          }
+          const int dlo = amrex::max<int>(domlo[d], fab_lo[d]);
+          const int dhi = amrex::min<int>(domhi[d], fab_hi[d]);
+          const int jm = amrex::max<int>(ivN[d] - 1, dlo);
+          const int jp = amrex::min<int>(ivN[d] + 1, dhi);
+          if (jp == jm) {
+            continue;
+          }
+          amrex::IntVect ivm(ivN), ivp(ivN);
+          ivm[d] = jm;
+          ivp[d] = jp;
+          for (int n = 0; n < NVAR; n++) {
+            s_tm[d][n] = dest(ivm, n);
+            s_tp[d][n] = dest(ivp, n);
+          }
+          tr.sm[d] = s_tm[d];
+          tr.sp[d] = s_tp[d];
+          tr.inv_dt[d] = 1.0 / (static_cast<amrex::Real>(jp - jm) * dx[d]);
+          tr.valid = true;
+        }
+      }
+
       amrex::Real s_ghost[NVAR];
       pc_nscbc::apply(
         s_N, s_Nm1, s_Nm2, n_stencil, dx[idir], idir, sgn, layer, tgt,
-        m_nscbc_prm[idir], s_ghost, m_nscbc_diag);
+        m_nscbc_prm[idir], s_ghost, m_nscbc_diag, &tr);
       for (int n = 0; n < NVAR; n++) {
         dest(iv, n) = s_ghost[n];
       }
@@ -398,6 +432,7 @@ PeleC::nscbc_params(const int idir)
   p.relax_u = bc_nscbc_relax_u;
   p.relax_t = bc_nscbc_relax_t;
   p.order = bc_nscbc_order;
+  p.beta = bc_nscbc_beta;
   p.pin_farfield = bc_nscbc_pin_farfield;
   // Only the ratio sigma/L_ref is physical.  L_ref is fixed to the domain
   // extent along the boundary normal so that sigma keeps the meaning it has
@@ -425,10 +460,10 @@ PeleC::nscbc_report_diagnostics()
   // The supersonic path is exact, not a degradation, so it is reported but is
   // not a warning.  The others mean the boundary is being asked for something
   // it cannot cleanly provide.
-  const long total = static_cast<long>(h[pc_nscbc::Diag::reversed]) +
-                     h[pc_nscbc::Diag::body_state] +
-                     h[pc_nscbc::Diag::eos_failure] +
-                     h[pc_nscbc::Diag::floored];
+  const long total =
+    static_cast<long>(h[pc_nscbc::Diag::reversed]) +
+    h[pc_nscbc::Diag::body_state] + h[pc_nscbc::Diag::eos_failure] +
+    h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop];
   if (amrex::ParallelDescriptor::IOProcessor() && (total > 0 || verbose > 1)) {
     amrex::Print() << "  NSCBC fallbacks since last report:" << "  supersonic "
                    << h[pc_nscbc::Diag::supersonic] << ",  flow reversal "

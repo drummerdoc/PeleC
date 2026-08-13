@@ -69,14 +69,20 @@
 //
 //  Two notes on what this is NOT:
 //
-//    1. There are no transverse terms and no reaction/viscous source terms in
-//       the modelled incoming waves.  This is the 1-D-normal LODI limit, i.e.
-//       Motheau's beta = 1.  It is adequate when the boundary is placed away
-//       from flames, shear layers and strong composition gradients, and it is
-//       not adequate when it is not.  Adding them is a local extension of the
-//       dR_-/dn expression above (they are additive on L_incoming), not a
-//       rewrite -- which is why the relaxation is written as a gradient
-//       increment rather than as a hard far-field pin.
+//    1. Transverse terms ARE available, weighted by Params::beta -- see the
+//       guidance on that member; the optimum is near 0.5 and the failure mode
+//       below ~0.3 is severe.  The reaction and viscous source contributions
+//       are NOT available: they need sources_for_hydro, which does not exist
+//       during FillPatch.  With
+//       beta = 1 (the default) the transverse terms are discarded too and this
+//       is the pure 1-D-normal LODI limit.  Either way, place an outflow away
+//       from flames: heat release in the boundary cell has no model here and
+//       shows up as a mean pressure offset.
+//
+//       That the transverse terms fit here at all is a consequence of writing
+//       the relaxation as a GRADIENT increment: they are additive on
+//       L_incoming, so there is a slot for them.  A hard far-field pin of R_-
+//       has no such slot, which is why pin_farfield ignores beta.
 //
 //    2. It is not a time-integrated boundary condition.  The fill is a pure
 //       algebraic function of the current interior state, so it is idempotent
@@ -139,6 +145,46 @@ struct Params
   // Inflow temperature and tangential-velocity relaxation.
   amrex::Real relax_t = 0.2;
 
+  // Weight on the transverse terms in the modelled incoming acoustic:
+  //     L_in = K (phi - phi_target) - (1 - beta) * T_transverse
+  //   1  discard them entirely -- the 1-D-normal LODI limit
+  //   0  include them fully
+  //   <0 use the local Mach number, |M|, clamped to [0,1]
+  // beta = 1 reproduces the Phase 1 behaviour bit for bit, which is why it is
+  // the default: enabling the transverse terms is an opt-in change.
+  //
+  // Guidance, measured in Exec/RegTests/NSCBC-COVO rather than assumed.
+  //
+  // For a plane wave meeting the boundary at angle theta to the normal, the
+  // obliqueness error that the transverse term has to cancel works out to
+  //
+  //     (1 - beta)_opt = cos(theta) / (1 + cos(theta))
+  //     =>  beta_opt   = 1 - cos(theta)/(1 + cos(theta))
+  //
+  // which is 0.5 at normal incidence and rises toward 1 as the wave becomes
+  // grazing (0.67 at 60 deg, 0.79 at 75 deg).  Both measured optima land on
+  // that curve: the convected vortex, a broad near-normal structure, is best
+  // at beta = 0.5; the circular pulse, whose surviving arc crossed the faces
+  // near-tangentially, is best at beta = 0.8.
+  //
+  //     COVO   rms residual vs the no-boundary floor:
+  //            hard 14.0x,  beta=1 10.0x,  beta=0.5 3.8x,  beta=0.2 16.1x,
+  //            beta=0 132x
+  //     pulse  front amplitude spread around the arc:
+  //            hard 21.4%,  beta=1 0.90%,  beta=0.8 0.066%,  beta=0 2.9%
+  //
+  // Note the shape of that curve: too little correction costs a factor of a
+  // few, too much is catastrophic.  beta below ~0.3 is worse than no
+  // transverse terms at all, and beta = 0 is close to unstable.  This is why
+  // the default is 1 (the Phase 1 behaviour) and not the optimum -- a wrong
+  // beta is far more dangerous than an absent one.  Start at 0.5, and raise
+  // it toward 1 if the boundary is mostly met at grazing incidence.
+  //
+  // beta < 0 selects the local Mach number, which is the legacy Fortran's
+  // convention.  The measurements above do not support it: at M = 0.2 it
+  // gives beta = 0.2, which is on the wrong side of the minimum.
+  amrex::Real beta = 1.0;
+
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
   // face by the caller.  Only the ratio sigma/L_ref is physical, so this is
   // not a user knob; it exists so that sigma keeps its literature meaning.
@@ -177,6 +223,11 @@ struct Params
       why = "bc_nscbc_relax_t must be >= 0";
       return false;
     }
+    if (beta > 1.0) {
+      why = "bc_nscbc_beta must be <= 1 (1 discards the transverse terms, 0 "
+            "includes them fully, negative selects the local Mach number)";
+      return false;
+    }
     if ((order != 1) && (order != 2)) {
       why = "bc_nscbc_order must be 1 or 2";
       return false;
@@ -211,17 +262,48 @@ struct Target
 };
 
 // ---------------------------------------------------------------------------
+//  Tangential neighbours of the BOUNDARY CELL, for the transverse terms.
+//
+//  The transverse contribution to the incoming acoustic amplitude is, in the
+//  outward-normal frame and summed over the tangential directions t,
+//
+//      T_in = sum_t [ u_t ( dp/dt - rho c du_out/dt ) ]  +  gamma p sum_t
+//      du_t/dt
+//
+//  which reduces to Motheau's T1 on a hi face and to his T4 on a lo face -- the
+//  outward frame absorbs the sign flip that makes those two look like different
+//  expressions.  Every derivative is evaluated at the boundary cell.
+//
+//  The caller supplies the two tangential neighbours per direction with their
+//  indices ALREADY CLAMPED into the domain, so only interior cells are ever
+//  read and the fill stays a pure function of valid data.  At a corner the
+//  clamp collapses the stencil, which is why the spacing is passed as an
+//  explicit reciprocal rather than assumed: inv_dt = 1/(x_p - x_m), and zero
+//  when both neighbours land on the same cell.  That degrades a corner to a
+//  one-sided or vanishing transverse derivative instead of reading a ghost
+//  cell another thread is writing.
+// ---------------------------------------------------------------------------
+struct Transverse
+{
+  const amrex::Real* sm[AMREX_SPACEDIM] = {};
+  const amrex::Real* sp[AMREX_SPACEDIM] = {};
+  amrex::Real inv_dt[AMREX_SPACEDIM] = {};
+  bool valid = false;
+};
+
+// ---------------------------------------------------------------------------
 //  Diagnostic counters.  Every fallback in this kernel is counted; a silent
 //  fallback is a bug that will not be found.  Indices into a small device
 //  array reduced at the end of the run.
 // ---------------------------------------------------------------------------
 namespace Diag {
 enum : int {
-  supersonic = 0, // |M| >= 1: zero-gradient copy is exact, not a failure
-  reversed,       // flow ran the wrong way through the face
-  body_state,     // an EB-covered cell was found in the stencil
-  eos_failure,    // an EOS call returned a non-finite or non-positive value
-  floored,        // a positivity floor was hit
+  supersonic = 0,  // |M| >= 1: zero-gradient copy is exact, not a failure
+  reversed,        // flow ran the wrong way through the face
+  body_state,      // an EB-covered cell was found in the stencil
+  eos_failure,     // an EOS call returned a non-finite or non-positive value
+  floored,         // a positivity floor was hit
+  transverse_drop, // a transverse derivative was unavailable or unusable
   count
 };
 }
@@ -419,7 +501,8 @@ apply(
   Target const& tgt,
   Params const& prm,
   amrex::Real s_ghost[NVAR],
-  int* diag = nullptr) noexcept
+  int* diag = nullptr,
+  Transverse const* tr = nullptr) noexcept
 {
   auto eos = pele::physics::PhysicsType::eos();
 
@@ -561,10 +644,60 @@ apply(
   const amrex::Real one_m_M2 =
     amrex::max<amrex::Real>(1.0 - mach * mach, constants::very_small_num());
 
+  // Transverse contribution to the modelled incoming wave.  Additive on the
+  // amplitude, which is exactly why the relaxation is written as a gradient
+  // increment: there is a well-defined slot for it here, and none at all in a
+  // hard far-field pin of R_-.
+  amrex::Real beta = prm.beta;
+  if (beta < 0.0) {
+    beta = amrex::min<amrex::Real>(std::abs(mach), 1.0);
+  }
+  amrex::Real T_in = 0.0;
+  if ((tr != nullptr) && tr->valid && (beta < 1.0)) {
+    amrex::Real gam = 0.0;
+    eos.RTY2G(qN.rho, qN.T, qN.Y, gam);
+    amrex::Real div_ut = 0.0;
+    bool any = false;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+      if (
+        (d == idir) || (tr->sm[d] == nullptr) || (tr->sp[d] == nullptr) ||
+        (tr->inv_dt[d] == 0.0)) {
+        continue;
+      }
+      const CellPrim qm = cell_primitives(tr->sm[d]);
+      const CellPrim qp = cell_primitives(tr->sp[d]);
+      if (!qm.ok || !qp.ok) {
+        bump(Diag::transverse_drop);
+        continue;
+      }
+      const amrex::Real dpdt = (qp.p - qm.p) * tr->inv_dt[d];
+      // du_out/dt: the normal velocity in the OUTWARD frame, differentiated
+      // along the tangential direction.  The n_sgn here is what turns the
+      // legacy hi-face T1 and lo-face T4 into one expression.
+      const amrex::Real duodt =
+        n_sgn * (qp.u[idir] - qm.u[idir]) * tr->inv_dt[d];
+      const amrex::Real dutdt = (qp.u[d] - qm.u[d]) * tr->inv_dt[d];
+      T_in += qN.u[d] * (dpdt - rho_c * duodt);
+      div_ut += dutdt;
+      any = true;
+    }
+    if (any && std::isfinite(gam) && (gam > 0.0)) {
+      T_in += gam * qN.p * div_ut;
+    } else {
+      T_in = 0.0;
+      bump(Diag::transverse_drop);
+    }
+    if (!std::isfinite(T_in)) {
+      T_in = 0.0;
+      bump(Diag::transverse_drop);
+    }
+  }
+
   amrex::Real Rm_g;
   if (outflow_face && prm.pin_farfield) {
     // CAMR-style hard pin: R_- takes its far-field value (u_out = 0,
-    // p = p_target).  Value constraint, not a rate; see the Params comment.
+    // p = p_target).  Value constraint, not a rate, and there is nowhere in it
+    // to put a transverse term -- so pin_farfield ignores beta.
     Rm_g = -tgt.p / rho_c;
   } else {
     amrex::Real L_in;
@@ -576,6 +709,7 @@ apply(
       const amrex::Real K = prm.relax_u * one_m_M2 * c_N / prm.L_ref;
       L_in = -K * qN.rho * c_N * (u_out_N - u_out_tgt);
     }
+    L_in -= (1.0 - beta) * T_in;
     Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dx_normal * L_in /
                     (lambda_in * rho_c);
   }

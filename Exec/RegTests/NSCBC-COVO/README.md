@@ -28,16 +28,22 @@ the arc.
 
 | | radius spread | amplitude spread |
 |---|---|---|
-| before the wave reaches the boundary (`ct` = 0.80 W) | 1.28% | 0.5% |
-| hard boundary, crossing (`ct` = 1.21 W) | 0.87% | **21.4%** |
-| NSCBC σ = 0.25, crossing (`ct` = 1.21 W) | **0.22%** | **0.89%** |
+| hard boundary | 0.98% | **21.4%** |
+| NSCBC, β = 1 (transverse off) | 0.47% | 0.90% |
+| NSCBC, β = 0.8 | 0.40% | **0.066%** |
+| NSCBC, β = 0.5 | 0.40% | 1.08% |
+| NSCBC, β = 0 (full transverse) | 0.36% | 2.95% |
 
 The amplitude column is the striking one. The hard boundary does not so much
 bend the front as *chew* it: by the time the corner-directed arc is all that is
 left, its strength varies by a factor of 1.2 around the arc, because the parts
 that passed near the faces have already been corrupted by reflections. The
-characteristic treatment holds it to 0.9% — within a factor of two of the
-pre-contact discretisation baseline.
+characteristic treatment holds it to 0.9% without transverse terms and to
+**0.066% with them at β = 0.8** — a further factor of 14.
+
+The radius column saturates: 0.4% is roughly one cell, so all the β < 1 rows
+are "as circular as this mesh can represent". Amplitude uniformity is the
+discriminating measure here, not radius.
 
 The picture says it faster than the table. With the hard boundary the
 rarefaction ring squares off, kinks at the corners, and grows four bright
@@ -62,14 +68,20 @@ exercises the **inflow** path end to end.
 
 This is the test that shows the current implementation's limit honestly.
 
-| configuration | max/δp | rms/δp | rms vs floor |
-|---|---|---|---|
-| **no boundary at all** (periodic; discretisation only) | 0.081 | **0.0047** | 1× |
-| hard inflow + hard outflow | 0.151 | 0.0652 | 14× |
-| hard inflow + NSCBC outflow | 0.170 | 0.0660 | 14× |
-| NSCBC inflow + NSCBC outflow | 0.126 | **0.0468** | **10×** |
-| … same, σ = 0 | 0.168 | 0.0702 | 15× |
-| … same, `relax_u` = 0.2 | 0.170 | 0.0677 | 14× |
+| configuration | rms/δp | rms vs floor |
+|---|---|---|
+| **no boundary at all** (periodic; discretisation only) | **0.0047** | 1× |
+| hard inflow + hard outflow | 0.0652 | 14.0× |
+| NSCBC, β = 1 (transverse off) | 0.0468 | 10.0× |
+| NSCBC, β = 0.8 | 0.0341 | 7.3× |
+| NSCBC, **β = 0.5** | **0.0176** | **3.8×** |
+| NSCBC, β = 0.35 | 0.0187 | 4.0× |
+| NSCBC, β = 0.2 (= local Mach) | 0.0754 | 16.1× |
+| NSCBC, β = 0 (full transverse) | 0.6184 | 132× |
+
+Dial sensitivity at β = 1, for reference: σ = 0 gives 15×, `relax_u` = 0.2 gives
+14×, and hard-inflow + NSCBC-outflow gives 14× — i.e. none of them matters
+compared to β.
 
 `δp` is the vortex's own pressure deficit (1.90e4 dyn/cm², ~1.9% of ambient).
 The periodic row is obtained by comparing the final field with the initial field
@@ -78,24 +90,40 @@ is lower still and the ratios below are conservative.
 
 Three things follow, and they are the point of the test.
 
-**The characteristic treatment helps, but only by about 1.4× in rms**, and the
-residual stays an order of magnitude above the no-boundary floor. Compare the
-NSCBC-Acoustic case, where a *planar* pulse at normal incidence reflects 120×
-less. The gap between 120× and 1.4× is the whole content of "1-D-normal LODI".
+**Without transverse terms the treatment helps by only 1.4×**, and the residual
+stays an order of magnitude above the no-boundary floor — against 120× for a
+*planar* pulse at normal incidence in NSCBC-Acoustic. That gap is the whole
+content of "1-D-normal LODI", and none of σ, `relax_u` or the choice of which
+boundary is characteristic closes it. When knobs span a decade and the answer
+does not move, the error is not in those knobs.
 
-**The dials are not what is limiting it.** Moving σ from 0.25 to 0, or `relax_u`
-from 2 to 0.2 — a factor of ten each — changes the rms by less than the choice
-of *which* boundary is characteristic. When a knob spans a decade and the answer
-does not move, the error is not in that knob. It is in the terms that are not
-there: the transverse contributions to the modelled incoming wave, Motheau's
-β. A vortex crossing an outflow is the maximally transverse event, which is
-exactly why this case was chosen.
+**Turning the transverse terms on closes most of it.** β = 0.5 brings the
+residual to 3.8× the floor: 2.7× better than β = 1 and 3.7× better than a hard
+boundary. That is the term the dial sweep was pointing at.
 
-**The outflow is nonetheless doing its job.** Switching only the outflow to the
-characteristic treatment cuts the upstream residual (mean |δp| over x < 3 cm)
-from 1648 to 342 dyn/cm² — a factor of 4.8. It is not sending a strong
-reflected wave back upstream; it is failing to absorb the vortex cleanly, which
-is a different fault with a different fix.
+**But the response to β is sharply asymmetric.** Too little correction costs a
+factor of a few; too much is catastrophic — β = 0.2 is worse than no transverse
+terms at all and β = 0 is close to unstable, at 132× the floor. That asymmetry
+is why the shipped default is β = 1 rather than the optimum. A wrong β is far
+more dangerous than an absent one.
+
+**The optimum is predictable, not empirical.** For a plane wave meeting the
+boundary at angle θ, the correction that exactly cancels the obliqueness error
+in the 1-D characteristic decomposition is `(1−β) = cos θ / (1 + cos θ)`, so
+
+    β_opt = 1 − cos θ / (1 + cos θ)
+
+which is 0.5 at normal incidence and rises toward 1 at grazing incidence (0.67
+at 60°, 0.79 at 75°). Both measured optima land on that curve: the vortex — a
+broad, near-normal-incidence structure — optimises at **0.5**, and the circular
+pulse, whose surviving arc crossed the faces near-tangentially, optimises at
+**0.8**. Two independent problems, one formula, no fitting.
+
+**The outflow was never the reflecting part.** Switching only the outflow to
+the characteristic treatment cuts the upstream residual (mean |δp| over
+x < 3 cm) from 1648 to 342 dyn/cm² — a factor of 4.8. It was not sending a
+reflected wave back upstream; it was failing to absorb the vortex cleanly,
+which is a different fault, and β is its fix.
 
 Use `prob.nscbc_inflow = 0` to leave the inflow to the ordinary `bcnormal` and
 isolate the outflow, which is how the third row above was obtained.
