@@ -23,7 +23,7 @@ More complex boundary conditions require user input that is prescribed explicitl
 .. note::
    To ensure conservation, when Godunov schemes are used the order of accuracy is reduced at boundaries specified using ``bcnormal``; PLM is used and the predictor step is omitted when computing fluxes through these boundaries. This does not affect any other boundary types or simulations using MOL.
 
-Special care should be taken when prescribing subsonic ``Inflow`` or an ``Outflow`` boundary conditions. It might be tempting to directly impose target values in the boundary filler function (for ``Inflow``), or to perform a simple extrapolation (for ``Outflow``).  However, this approach would fail to correctly respect the flow of information along solution characteristics - the system would be ill-posed and would lead to unphysical behavior. In particular, at a subsonic inflow boundary, at a subsonic inlet there is one outgoing characteristic, so one flow variable must be specified using information from inside the domain. Similarly, there is one incoming characteristic at outflow boundaries. The NSCBC method, described below, is the preferred method to account for this, but has not been ported to the all C++ version of PeleC. In the meantime, the recommended strategy for subsonic inflow and outflow boundaries for confined geometries such as nozzles and combustors is as follows:
+Special care should be taken when prescribing subsonic ``Inflow`` or an ``Outflow`` boundary conditions. It might be tempting to directly impose target values in the boundary filler function (for ``Inflow``), or to perform a simple extrapolation (for ``Outflow``).  However, this approach would fail to correctly respect the flow of information along solution characteristics - the system would be ill-posed and would lead to unphysical behavior. In particular, at a subsonic inflow boundary, at a subsonic inlet there is one outgoing characteristic, so one flow variable must be specified using information from inside the domain. Similarly, there is one incoming characteristic at outflow boundaries. The :ref:`NSCBC method <NSCBC>` described below is the preferred way to account for this. A simpler alternative, adequate when the boundary is far from any acoustic source of interest, is:
 
 * Subsonic Inflows: Specify the desired temperature, velocity, and composition (if relevant) in the ghost cells. Take the pressure from the domain interior. Based on these values, compute the density, internal energy, and total energy for the ghost cells.
 
@@ -36,252 +36,205 @@ Isothermal Walls
 
 By default, the boundaries specified as ``NoSlipWall`` and ``SlipWall`` are adiabatic. For isothermal wall boundaries, energy fluxes through the isothermal wall are computed separately, rather than being based on values populated in the ghost cells. To activate computation of isothermal wallfluxes, use the input file option ``pelec.do_isothermal_walls = 1`` and then specify the desired wall temperatures using, for example, ``pelec.domlo_wall_temp = -1 -1 300.0`` and ``pelec.domhi_isothermal_temp = -1 -1 400.0``, which would leave the x and y boundaries as adiabatic, make the lower z boundary isothermal at 300 K, and make the upper z boundary isothermal at 400 K. Any boundary with a negative (or zero) value for the specified temperature is treated as adiabatic; boundaries that are not ``NoSlipWall``, ``SlipWall``, ``UserBC``, or ``Hard`` must always have a negative value specified.
 
+.. _NSCBC:
+
 Navier-Stokes Characteristic Boundary Conditions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. warning::
+Directly imposing a target state at a subsonic inflow, or extrapolating at a subsonic outflow, does not respect the
+flow of information along the solution characteristics: the resulting problem is ill-posed and acoustic waves reflect
+off the boundary back into the domain. The remedy is to decompose the boundary state into characteristic waves, take
+the outgoing ones from the interior, and model only the incoming ones. This is the Navier-Stokes Characteristic
+Boundary Condition (NSCBC) strategy of `Poinsot and Lele (1992) JCP
+<https://www.sciencedirect.com/science/article/pii/0021999192900462>`_, in the ghost-cell form of `Motheau et al.
+(2017) AIAA Journal <https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_.
+
+Enable it with::
+
+    pelec.bc_nscbc = 1
+
+and provide a ``bcnormal_nscbc`` hook in the problem's ``prob.H`` (see below). The switch alone does nothing: the
+treatment is applied only at boundary *points* for which that hook returns a live target, so a problem that does not
+provide it is unaffected. A face must be ``Hard`` or ``UserBC`` for the treatment to reach it.
+
+.. note::
+
+   The current implementation is the **1-D-normal LODI limit**: the modelled incoming waves carry no transverse
+   terms and no reaction- or viscous-source correction (Motheau's :math:`\beta = 1`). It is well suited to
+   boundaries placed away from flames, shear layers and composition fronts, and it is not a substitute for placing
+   them there. See *Where to put the boundary* below.
+
+What is specified, and what is not
+""""""""""""""""""""""""""""""""""
+
+In an outward-normal frame the wave speeds are :math:`u_n - c`, :math:`u_n` (with multiplicity
+:math:`D - 1 + N_{\rm spec} + \ldots`) and :math:`u_n + c`. At a subsonic boundary :math:`u_n + c` always leaves and
+:math:`u_n - c` always enters; the :math:`u_n` family leaves at an outflow and enters at an inflow. Hence:
+
+* **Subsonic outflow** has exactly one incoming characteristic, so exactly one quantity may be specified: the
+  pressure. Density, temperature, velocity, mass fractions and passive scalars are all *extrapolated*. In particular
+  **composition must not be imposed at an outflow** — doing so over-specifies the problem and plants a spurious
+  composition front on the boundary.
+* **Subsonic inflow** has :math:`D + N_{\rm spec} + 1` incoming characteristics: velocity, temperature and
+  composition are specified, and only the outgoing acoustic comes from the interior.
+* **Supersonic outflow** needs nothing; a zero-gradient copy is exact.
+* **Supersonic inflow** is a full Dirichlet condition.
+
+The implementation dispatches on the local Mach number and handles all of these, including transient flow reversal
+through a face, without any user intervention.
+
+Controls
+""""""""
+
+There are three physical dials, and for the commonest case — one non-reflecting subsonic outflow — none of them
+needs to be changed.
+
+.. table::
+
+   ==================================  =========  ==========================================================
+   Parameter                           Default    Meaning
+   ==================================  =========  ==========================================================
+   ``pelec.bc_nscbc``                  0          Master switch.
+   ``pelec.bc_nscbc_sigma``            0.25       Outflow pressure relaxation (Poinsot-Lele :math:`\sigma`).
+   ``pelec.bc_nscbc_relax_u``          2.0        Inflow normal-velocity relaxation.
+   ``pelec.bc_nscbc_relax_t``          0.2        Inflow temperature and tangential-velocity relaxation.
+   ``pelec.bc_nscbc_order``            2          Extrapolation order, 1 or 2. Verification knob only.
+   ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
+   ==================================  =========  ==========================================================
+
+**All of these are positive.** The legacy Fortran implementation required ``relax_T`` to be negative and its
+documentation and its code disagreed about the sign of ``sigma_out``; every internal sign is now handled by the
+kernel, and a negative coefficient is a fatal error.
+
+There is deliberately **no relaxation coefficient for composition**. At an inflow every species characteristic is
+incoming, so hard imposition is well posed and needs no dial; at an outflow every species characteristic is
+outgoing, so composition is extrapolated and there is nothing to relax.
+
+There is also no separate reference-length parameter. The relaxation *rate* is
+
+.. math::
+
+   K = \sigma \, (1 - M^2) \, c / L , \qquad \tau_{\rm relax} = 1/K ,
+
+with :math:`L` the domain extent along the boundary normal. Only the ratio :math:`\sigma/L` is physical, so exposing
+both would be two dials for one degree of freedom. Dividing through by the acoustic transit time :math:`L/c` gives
+the number that actually matters:
+
+.. math::
+
+   \frac{\tau_{\rm relax}}{\tau_{\rm acoustic}} = \frac{1}{\sigma (1 - M^2)} ,
+
+so :math:`\sigma = 0.25` at low Mach means *the boundary pressure is pulled back to the target over about four
+acoustic transit times*. That is the whole content of "0.25 is a good default", and it gives two conditions to
+check: :math:`\tau_{\rm relax}` must be much larger than the acoustic transit time, so that outgoing waves leave
+before the pressure is pulled back, and much smaller than the run time, so that the mean pressure does not drift.
+PeleC prints both at startup. Rudy and Strikwerda (*JCP* **36**, 55, 1980) find :math:`\sigma \approx 0.27` optimal
+for a 1-D pulse; the usual band is 0.15-0.3. :math:`\sigma = 0` is *perfectly* non-reflecting and leaves the mean
+pressure entirely unanchored.
+
+``bc_nscbc_pin_farfield`` replaces the relaxation by a hard pin of the incoming invariant to its far-field value.
+That is simultaneously non-reflecting and anchored, which a rate-based relaxation cannot be, but it anchors to
+:math:`p_{\rm target} + \rho c u_n` rather than to :math:`p_{\rm target}`, and because it constrains a *value*
+rather than a rate its effective relaxation rate is :math:`c/\Delta x` and it does not converge under mesh
+refinement. Use it for an open boundary onto a large quiescent reservoir; do not use it for a duct exhausting into
+a plenum whose true mean pressure is not the target.
+
+Providing a target
+""""""""""""""""""
+
+Override ``bcnormal_nscbc`` in the problem's ``ProblemSpecificFunctions``. The decision is made per boundary
+*point*, so a single face may mix an inflow, an outflow and a wall::
+
+    struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
+    {
+      AMREX_GPU_DEVICE
+      AMREX_FORCE_INLINE
+      static pc_nscbc::Target bcnormal_nscbc(
+        const amrex::Real* x,
+        const amrex::Real* /*s_int*/,
+        const int idir,
+        const int sgn,
+        const amrex::Real /*time*/,
+        amrex::GeometryData const& /*geomdata*/,
+        ProbParmDevice const& prob_parm)
+      {
+        pc_nscbc::Target t;
+        if (idir == 0 && sgn == -1) {          // x-hi: non-reflecting outflow
+          t.type = pc_nscbc::Type::outflow;
+          t.p = prob_parm.p_amb;               // the ONLY thing specified
+        } else if (idir == 0 && sgn == +1) {   // x-lo: jet inlet in a wall
+          if (std::abs(x[1]) < prob_parm.jet_radius) {
+            t.type = pc_nscbc::Type::inflow;
+            t.u[0] = prob_parm.u_jet;
+            t.T = prob_parm.T_jet;
+            for (int n = 0; n < NUM_SPECIES; n++) {
+              t.Y[n] = prob_parm.Y_jet[n];
+            }
+          }
+          // outside the jet, t.type stays `off` and the point falls through
+          // to the ordinary bcnormal(), which can make it a wall
+        }
+        return t;
+      }
+    };
+    using ProblemSpecificFunctions = MyProblemSpecificFunctions;
+
+``x`` is the location on the boundary *plane*, not the ghost-cell centre: the target is a property of the boundary
+point and must not vary with the ghost layer. Returning the default-constructed ``Target`` (type ``off``) leaves the
+point to the ordinary ``bcnormal`` path.
+
+Where to put the boundary
+"""""""""""""""""""""""""
+
+The quality of a characteristic boundary condition is set more by where the boundary is than by the dials.
+
+* Put a subsonic outflow at least one acoustic wavelength of the lowest frequency of interest, and roughly ten flame
+  thicknesses, downstream of any reaction zone. The modelled incoming wave carries no reaction-source term, so heat
+  release in the boundary cell shows up as a mean pressure offset that :math:`\sigma` must absorb.
+* Avoid placing an outflow across a strong shear layer, a vortex core or a composition front. The acoustic impedance
+  :math:`\rho c` is frozen at the boundary cell, and that linearisation is weakest exactly there.
+* Do not refine an AMR level at an outflow face. The residual reflection is :math:`O(\Delta x^p)` and the
+  extrapolation stencil is level-local, so a fine patch on the boundary introduces a level-dependent artefact.
+* If a sponge or artificial-viscosity ramp is currently needed at an outflow, removing it is the acceptance test for
+  the boundary condition, not something to keep for safety.
+
+Diagnosing
+""""""""""
+
+Every fallback path in the kernel is counted, and the counts are reported alongside the other integrated quantities
+when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
+
+.. table::
+
+   ===============================================  ==========================================================
+   Symptom                                          Action
+   ===============================================  ==========================================================
+   Outgoing pulse visibly reflects                  Reduce :math:`\sigma` toward 0.15; confirm ``order = 2``.
+   Mean pressure drifts over a long run             Increase :math:`\sigma` so :math:`\tau_{\rm relax}` is
+                                                    well below the run time; or move the outflow away from
+                                                    the flame.
+   Reflects *and* drifts                            The boundary is sitting on a flame or shear layer. No
+                                                    dial fixes this; move it.
+   Reflection persists at any :math:`\sigma`, 2-D    Missing transverse terms. Move the boundary further out.
+   Inflow never reaches the target velocity         Increase ``relax_u``.
+   Inflow oscillates or goes unstable               Reduce ``relax_u``; a value much above 10 is a hard
+                                                    Dirichlet condition in disguise, which is ill-posed for
+                                                    the number of incoming characteristics.
+   Inlet temperature sags below target              Increase ``relax_t``.
+   Turbulent inlet :math:`u'` below the prescribed   ``relax_u`` low-pass filters the injected spectrum.
+   intensity                                        Increase it, or rescale the prescribed intensity to hit
+                                                    the realised one.
+   ``flow reversal`` count sustained above zero     The outflow is misplaced, or the face should be an
+                                                    inflow. Transient counts are benign.
+   ``EB body state`` count above zero               Covered cells are adjacent to the boundary face; the
+                                                    stencil order was degraded to avoid them.
+   ===============================================  ==========================================================
+
+Verification
+""""""""""""
+
+``Verification/NSCBC1D`` compiles the production kernel unmodified against a minimal 1-D solver and asserts uniform-
+state consistency, relaxation direction, species handling, acoustic reflection, grid-independence of the relaxation
+rate, and every fallback path. It also produces the reference :math:`\sigma` sweep. Run it before trusting a change
+to ``Source/NSCBC.H``.
 
-   **The GC-NSCBC boundary condition is not available in the C++ version of PeleC.** It was removed along with
-   the rest of the Fortran source. The description below documents the Fortran API for historical reference and
-   because it is the only surviving statement of the intended user-facing semantics; none of it can be called today.
-   The input parameters ``pelec.nscbc_adv`` and ``pelec.nscbc_diff`` were declared but never read by any live code
-   path, and have been **removed** — ``nscbc_adv`` defaulted to ``true``, so leaving a dead parameter with an
-   "on" default in place would have made any future reconnection silently change the behaviour of every
-   ``Hard``/``UserBC`` case that did not explicitly opt out. PeleC now aborts if either key appears in an inputs
-   file. Until a C++ implementation lands, use the subsonic inflow/outflow guidance given above.
-
-A well-known approach to the subsonic problem is the Navier-Stokes Characteristic Boundary Conditions
-(NSCBC) strategy, and is described in the paper `Poinsot and Lele (1992) JCP
-<https://www.sciencedirect.com/science/article/pii/0021999192900462>`_.  In the method, the hyperbolic structure is
-decomposed to identify incoming and outgoing waves, given a statement of the "external" state outside the domain, and
-then to construct a model that gives "desired" behavior at the interface.  One issue with direct application of
-the NSCBC treatment in PeleC is that it is formulated to impose boundary fluxes directly. In PeleC however, the
-Godunov approach that is implemented makes use of boundary data specified via grow cell values, and reconstructs fluxes at faces when required. Thus, the NSCBC strategy has been reformulated to provide the grow cell data required in PeleC. The strategy,
-the Ghost-Cells Navier-Stokes Boundary Conditions (GC-NSCBC) method, is described in `Motheau et al. (2017) AIAA Journal
-<https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_.
-
-For the characteristics-based boundary condition implementation, the solution is rewritten in terms of one-dimensional hyperbolic wave propagation. The waves leaving the domain are computed numerically, while the waves entering into the domain are provided by a model that is based on a "target state". With the help of numerical relaxation parameters, the contribution of entering waves can be controlled to afford some freedom at the boundary to "push" toward a target state while also allowing acoustic waves to leave the domain.  The approach allows some control to minimize the effects of reflected waves, which would otherwise result from the "hard" imposition of the external conditions. Description of the relevant theory is beyond the scope of this documentation (see the paper `Motheau et al. (2017) AIAA Journal
-<https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_, which also contains examples demonstrating why imposing directly target values in ghost-cells
-does not work as expected, and why the NSCBC theory helps to get a more "desirable" solution).
-
-In order to understand the impact of the GC-NSCBC treatment, we give an example that imposes "hard" values in the ghost-cells to represent external conditions, and uses first-order extrapolation at the outflow boundary.
-A precomputed 1D flame profile is interpolated onto a uniform PeleC grid. Because the solution has to adapt to the new grid and to the PeleC numerical discretization, it creates an unphysical acoustic bump that moves through the domain as an acoustic disturbance.  With "hard" boundary conditions, this disturbance is reflected from the outflow boundary back into the domain, and interacts with the flame upstream.  A steady solution to this system would require the propagation of this wave back and forth until numerical diffusion eventually reduces its magnitude below some threshold. With the GC-NSCBC boundary treatment, the acoustic wave simply leaves the computational domain.  Often times, the latter is the desired behavior of the code.
-
-.. only:: html
-
-    .. figure:: /images/1D_PMF_NO_NSCBC.gif
-       :align: center
-       :figwidth: 40%
-
-
-   No GC-NSCBC treatment, hard values set at the left boundary for the inflow, and first order extrapolation in the right boundary to mimic an outflow. The unphysical reflections of the acoustic wave at boundary can be clearly seen.
-
-.. only:: html
-
-    .. figure:: /images/1D_PMF_WITH_NSCBC.gif
-       :align: center
-       :figwidth: 40%
-
-
-With the GC-NSCBC, the spurious acoustic wave simply leaves the domain with no unphysical reflection.
-
-In PeleC, the subroutine ``bcnormal`` is used to provide the target state for the GC-NSCBC treatment as well as the numerical parameters used by the GC-NSCBC method to efficiently "damp" the reflected waves. Note the signature and the content of the ``bcnormal`` routine:
-
-::
-
-    subroutine bcnormal(x,u_int,u_ext,dir,sgn,time,bc_type,bc_params,bc_target)
-
-    ...
-
-    integer, optional, intent(out) :: bc_type
-    double precision, optional, intent(out) :: bc_params(6)
-    double precision, optional, intent(out) :: bc_target(5)
-
-    ...
-
-    double precision :: relax_U, relax_V, relax_W, relax_T, beta, sigma_out
-    integer :: flag_nscbc, which_bc_type
-
-    flag_nscbc = 0
-
-    ! When optional arguments are present, GC-NSCBC is activated
-    ! Generic values are auto-filled for numerical parameters,
-    ! but should be set by the user for each BC
-    ! Note that in the impose_NSCBC_xD.f90 routine, not all parameters are used in same time
-    if (present(bc_type).and.present(bc_params).and.present(bc_target)) then
-      flag_nscbc = 1
-      relax_U = 0.5d0 ! For inflow only, relax parameter for x_velocity
-      relax_V = 0.5d0 ! For inflow only, relax parameter for y_velocity
-      relax_W = 0.5d0 ! For inflow only, relax parameter for z_velocity
-      relax_T = -0.2d0 ! For inflow only, relax parameter for temperature
-      beta = 1.0d0  ! Control the contribution of transverse terms, here they will be discarded
-      sigma_out = -0.6d0 ! For outflow only, relax parameter. A negative value means that the local Mach number will be used
-      which_bc_type = Interior ! This is to ensure that nothing will be done if the user don't set anything
-    endif
-
-
-When ``bc_type``, ``bc_params`` and ``bc_target`` parameters are present, the routine is likely being called from ``impose_NSCBC_(dir)d.F90``. In this case the flag ``flag_nscbc`` is activated to fill optional arrays with the requisite data. Note however that the ``FillPatch`` operation called in the AMReX framework also calls ``pc_hypfill``, which then also calls ``bcnormal``.  In this case, the GC-NSCBC parameters are not directly relevant. In order to make ``bc_normal`` sufficiently generic for both purposes, only the target state is returned to ``pc_hypfill`` and the parameters associated to the GC-NSCBC method are ignored. In the Fortran version, the GC-NSCBC method was activated by default for all subsonic flow boundaries, and could be turned off by setting the flags ``nscbc_adv`` and ``nscbc_diff`` to zero, in which case the ghost-cells were filled directly with the target state (which, as mentioned, will likely lead to undesired behavior in the solution!). **Those flags no longer exist**; see the warning above.
-
-
-The use of ``bc_type``, ``bc_params`` and ``bc_target`` will be described in detail in other sections of this documentation, but let us focus here on the parameter, ``bc_type``. The ``bc_type`` (an integer) is a coded form of the physical boundary condition that we want to impose, and this is done point-wise. This means that along a face of the domain, different physical boundary conditions
-can be combined. For example, one may wish to impose an inflow in the middle of a wall in order to represent a localized inlet jet or an open boundary. Four physical boundary conditions are implemented in the GC-NSCBC framework: ``Inflow``, ``Outflow``, ``SlipWall``, ``NoSlipWall``.
-
-``Inflow`` and ``Outflow`` conditions rely on different models for the waves entering into the domain, and are computed in the routine ``compute_waves`` in ``impose_NSCBC_(dir)d.F90``.
-For example in 2D, ``Inflow`` requires models for three incoming waves. Thus, three relaxation parameters are needed: ``relax_U``, ``relax_V`` and ``relax_T``. Also, three state target
-values are needed: ``TARGET_VX``, ``TARGET_VY`` and ``TARGET_TEMPERATURE``. For an ``Outflow``, only one wave is leaving the domain, so only ``TARGET_PRESSURE`` is needed, and
-the relaxation parameter is controlled with ``sigma_out``. Note that transverse terms can be included in the computation of the waves, and the amount of contribution is controlled
-by the parameter ``beta``, with values between 0 (full contribution) and 1 (no contribution). A negative input value of ``beta`` indicates that ``beta`` will be adjusted dynamically with the Mach number of the local flow (see `Motheau et al. (2017) AIAA Journal
-<https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_ and other references therein for details).
-
-The ``impose_NSCBC_(dir)d.F90`` routine is organized as follows:
-
-* First, data in ghost-cells along the direction at corners are treated. This is because we have to use a one-sided derivative to compute transverse terms at corners.
-* For each cell, we compute derivatives in the normal and tangential directions of the face.
-* We call bcnormal to get: the physical boundary (``bc_type``), the target state values (``bc_target``), and the associated numerical parameters (``bc_params``).
-* Then we compute the NSCBC waves.
-* The last step is GC-NSCBC procedure to recompute the values in ghost-cells according to the characteristic waves that have been computed in the previous step.
-
-This procedure is done for each face of the domain.
-
-Below is an example to achieve an inflow/outflow along the x-axis of a channel, periodic in y. Note how the ``bc_params`` and ``bc_target`` arrays are constructed at the end of the routine.
-
-::
-
-    subroutine bcnormal(x,u_int,u_ext,dir,sgn,time,bc_type,bc_params,bc_target)
-
-    use probdata_module
-    use eos_type_module
-    use eos_module
-    use meth_params_module, only : URHO, UMX, UMY, UMZ, UTEMP, UEDEN, UEINT, UFS
-    use network, only: nspecies, naux, molec_wt
-    use prob_params_module, only : Interior, Inflow, Outflow, SlipWall, NoSlipWall, &
-                                   problo, probhi
-
-
-    use bl_constants_module, only: M_PI
-
-    implicit none
-
-    double precision :: x(3), time
-    double precision :: u_int(*),u_ext(*)
-    integer :: dir,sgn
-    integer, optional, intent(out) :: bc_type
-    double precision, optional, intent(out) :: bc_params(6)
-    double precision, optional, intent(out) :: bc_target(5)
-
-    type (eos_t) :: eos_state
-    double precision :: u(3)
-    double precision :: y
-    double precision :: relax_U, relax_V, relax_W, relax_T, beta, sigma_out
-    integer :: flag_nscbc, which_bc_type
-
-    flag_nscbc = 0
-
-    ! When optional arguments are present, GC-NSCBC is activated
-    ! Generic values are auto-filled for numerical parameters,
-    ! but should be set by the user for each BC
-    ! Note that in the impose_NSCBC_xD.f90 routine, not all parameters are used in same time
-    if (present(bc_type).and.present(bc_params).and.present(bc_target)) then
-
-      flag_nscbc = 1
-      relax_U = 0.5d0 ! For inflow only, relax parameter for x_velocity
-      relax_V = 0.5d0 ! For inflow only, relax parameter for y_velocity
-      relax_W = 0.5d0 ! For inflow only, relax parameter for z_velocity
-      relax_T = 0.2d0 ! For inflow only, relax parameter for temperature
-      beta = 0.2d0  ! Control the contribution of transverse terms
-      sigma_out = 0.25d0 ! For outflow only, relax parameter
-      which_bc_type = Interior ! This is to ensure that nothing will be done if the user don't set anything
-    endif
-
-    call build(eos_state)
-
-    ! at low X
-    if (dir == 1) then
-      if (sgn == 1) then
-
-        relax_U = 10.0d0
-        relax_V = 2.0d0
-        relax_T = - relax_V
-        beta = 0.6d0
-
-        which_bc_type = Inflow
-
-        u(1) = u_ref
-        u(2) = 0.0d0
-        u(3) = 0.0d0
-        eos_state % massfrac(1) = 1.d0
-        eos_state % p = p_ref
-        eos_state % T = T_ref
-        call eos_tp(eos_state)
-
-      end if
-
-    ! at hi X
-      if (sgn == -1) then
-
-        ! Set outflow pressure
-        which_bc_type = Outflow
-        sigma_out = 0.28d0
-        beta = -0.60d0
-
-        u(1:3) = 0.d0
-        eos_state % massfrac(1) = 1.d0
-        eos_state % p = p_ref
-        eos_state % T = T_ref
-        call eos_tp(eos_state)
-
-      end if
-    end if
-
-    ! at low Y
-    if (dir == 2) then
-      if (sgn == 1) then
-
-        ! Do nothing, this is periodic
-
-      end if
-
-    ! at hi Y
-      if (sgn == -1) then
-
-       ! Do nothing, this is periodic
-
-      end if
-    end if
-
-
-       u_ext(UFS:UFS+nspecies-1) = eos_state % massfrac * eos_state % rho
-       u_ext(URHO)               = eos_state % rho
-       u_ext(UMX)                = eos_state % rho  *  u(1)
-       u_ext(UMY)                = eos_state % rho  *  u(2)
-       u_ext(UMZ)                = eos_state % rho  *  u(3)
-       u_ext(UTEMP)              = eos_state % T
-       u_ext(UEINT)              = eos_state % rho  *   eos_state % e
-       u_ext(UEDEN)              = eos_state % rho  *  (eos_state % e + 0.5d0 * (u(1)**2 + u(2)**2) + u(3)**2)
-
-    ! Here the optional parameters are filled by the local variables if they were present
-    if (flag_nscbc == 1) then
-      bc_type = which_bc_type
-      bc_params(1) = relax_T!  For inflow only, relax parameter for temperature
-      bc_params(2) = relax_U ! For inflow only, relax parameter for x_velocity
-      bc_params(3) = relax_V ! For inflow only, relax parameter for y_velocity
-      bc_params(4) = relax_W ! For inflow only, relax parameter for z_velocity
-      bc_params(5) = beta  ! Control the contribution of transverse terms.
-      bc_params(6) = sigma_out ! For outflow only, relax parameter
-      bc_target(1) = U_ext(UMX)/U_ext(URHO)  ! Target for Inflow
-      bc_target(2) = U_ext(UMY)/U_ext(URHO)  ! Target for Inflow
-      bc_target(3) = U_ext(UMZ)/U_ext(URHO)  ! Target for Inflow
-      bc_target(4) = U_ext(UTEMP)            ! Target for Inflow
-      bc_target(5) = eos_state%p             ! Target for Outflow
-    end if
-
-    call destroy(eos_state)
-
-  end subroutine bcnormal
-
-The choice of the relaxation parameters in  ``bc_params`` is case-dependent, unfortunately. Some trial-and-error is often required to find the best values. However, we suggest the the following based on literature and practical experience:
-
-* ``relax_U``, ``relax_V`` and ``relax_W`` should have values near 0.2. Higher values will impose the velocity more "strongly", but will likely lead to more unphysical waves reflection.
-* ``relax_T`` must be a negative value, typically near -0.2.
-* For outflow boundaries, ``sigma_out`` = 0.25 is often reported to be a good choice.
-* The ``beta`` must be between 0 and 1; it controls the contribution of transverse terms. The choice for this parameter is more complicated. For outflows, it should be close to the Mach number. For some cases, a spatially averaged Mach number will provide good results, while for other cases, the point-wise local Mach number is better. ``beta`` will be set to the local Mach number if it is set to a negative value in the inputs. For inflows, it has been found that a value of 0.5 provides good results, but it may lead to instabilities, and for some case turning off the transverse terms (beta=1) will be better.

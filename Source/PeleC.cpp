@@ -233,9 +233,8 @@ PeleC::read_params()
     } else if (lo_bc_char[dir] == "UserBC") {
       lo_bc[dir] = 6;
     } else {
-      amrex::Abort(
-        "Wrong boundary condition word in lo_bc, please use: "
-        "Interior, UserBC, Symmetry, SlipWall, NoSlipWall");
+      amrex::Abort("Wrong boundary condition word in lo_bc, please use: "
+                   "Interior, UserBC, Symmetry, SlipWall, NoSlipWall");
     }
 
     if (hi_bc_char[dir] == "Interior") {
@@ -253,9 +252,8 @@ PeleC::read_params()
     } else if (hi_bc_char[dir] == "UserBC") {
       hi_bc[dir] = 6;
     } else {
-      amrex::Abort(
-        "Wrong boundary condition word in hi_bc, please use: "
-        "Interior, UserBC, Symmetry, SlipWall, NoSlipWall");
+      amrex::Abort("Wrong boundary condition word in hi_bc, please use: "
+                   "Interior, UserBC, Symmetry, SlipWall, NoSlipWall");
     }
   }
 
@@ -322,9 +320,8 @@ PeleC::read_params()
         lo_bc[dir] != PCPhysBCType::no_slip_wall &&
         lo_bc[dir] != PCPhysBCType::user_bc &&
         lo_bc[dir] != PCPhysBCType::inflow) {
-        amrex::Abort(
-          "Cannot have isothermal wall on a BC that isn't a wall or "
-          "user defined BC");
+        amrex::Abort("Cannot have isothermal wall on a BC that isn't a wall or "
+                     "user defined BC");
       }
       if (
         domhi_isothermal_temp[dir] > 0.0 &&
@@ -332,17 +329,82 @@ PeleC::read_params()
         hi_bc[dir] != PCPhysBCType::no_slip_wall &&
         hi_bc[dir] != PCPhysBCType::user_bc &&
         hi_bc[dir] != PCPhysBCType::inflow) {
-        amrex::Abort(
-          "Cannot have isothermal wall on a BC that isn't a wall or "
-          "user defined BC");
+        amrex::Abort("Cannot have isothermal wall on a BC that isn't a wall or "
+                     "user defined BC");
       }
     }
   }
 
+  if (bc_nscbc) {
+    pc_nscbc::Params probe = nscbc_params(0);
+    probe.sigma = bc_nscbc_sigma;
+    std::string why;
+    if (!probe.validate(why)) {
+      amrex::Abort("pelec.bc_nscbc_*: " + why);
+    }
+    // The treatment only ever acts on ext_dir faces, i.e. Hard/UserBC.
+    bool any_ext_dir = false;
+    for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+      for (const auto& b : {lo_bc[dir], hi_bc[dir]}) {
+        any_ext_dir = any_ext_dir || (b == PCPhysBCType::user_bc) ||
+                      (b == PCPhysBCType::inflow);
+      }
+    }
+    if (!any_ext_dir) {
+      amrex::Abort("pelec.bc_nscbc = 1 but no boundary is Hard or UserBC. The "
+                   "characteristic treatment only acts on those faces.");
+    }
+    // Chemistry integrated in ghost cells would burn the state the boundary
+    // condition just wrote there -- a hot inflow target composition would
+    // ignite in the ghost region.
+    if (state_nghost > 0) {
+      amrex::Abort(
+        "pelec.bc_nscbc = 1 with pelec.state_nghost > 0: reactions are "
+        "integrated over grown tileboxes, which would advance chemistry in "
+        "the ghost cells written by the boundary condition.");
+    }
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+      amrex::Print()
+        << "\n  NSCBC: characteristic boundary treatment ENABLED (advective "
+           "ghost fill).\n"
+        << "    This is the 1-D-normal LODI limit: no transverse terms and no\n"
+        << "    reaction-source correction. Place outflows away from flames,\n"
+        << "    shear layers and composition fronts. See Source/NSCBC.H.\n";
+      if (bc_nscbc_pin_farfield) {
+        amrex::Print()
+          << "    incoming acoustic PINNED to the far field; bc_nscbc_sigma "
+             "ignored.\n"
+          << "    Anchors to p_target + rho*c*u and does not converge under "
+             "mesh refinement.\n";
+      } else {
+        amrex::Print() << "    sigma   = " << bc_nscbc_sigma;
+        if (bc_nscbc_sigma > 0.0) {
+          amrex::Print()
+            << "  ->  outflow pressure relaxes over " << 1.0 / bc_nscbc_sigma
+            << " acoustic transit times at low Mach\n"
+            << "               (tau_relax / tau_acoustic = 1 / (sigma (1 - "
+               "M^2)));\n"
+            << "               it must be much larger than 1 and much smaller "
+               "than the run time.\n";
+        } else {
+          amrex::Print() << "  ->  perfectly non-reflecting; the mean pressure "
+                            "is NOT anchored and will drift.\n";
+        }
+      }
+      amrex::Print() << "    relax_u = " << bc_nscbc_relax_u
+                     << ",  relax_t = " << bc_nscbc_relax_t
+                     << ",  order = " << bc_nscbc_order << "\n";
+      amrex::Print() << "    L_ref   = (";
+      for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+        amrex::Print() << (dir > 0 ? ", " : "") << nscbc_params(dir).L_ref;
+      }
+      amrex::Print() << ")\n\n";
+    }
+  }
+
   if (amrex::DefaultGeometry().IsRZ() && (lo_bc[0] != PCPhysBCType::symmetry)) {
-    amrex::Error(
-      "PeleC::read_params: must set r=0 boundary condition to "
-      "Symmetry for r-z");
+    amrex::Error("PeleC::read_params: must set r=0 boundary condition to "
+                 "Symmetry for r-z");
   }
 
   // TODO: Any reason to support spherical in PeleC?
@@ -2328,10 +2390,9 @@ PeleC::build_interior_boundary_mask(int ng)
     ib_mask.resize(0);
   }
 
-  ib_mask.push_back(
-    std::make_unique<amrex::iMultiFab>(
-      grids, dmap, 1, ng, amrex::MFInfo(),
-      amrex::DefaultFabFactory<amrex::IArrayBox>()));
+  ib_mask.push_back(std::make_unique<amrex::iMultiFab>(
+    grids, dmap, 1, ng, amrex::MFInfo(),
+    amrex::DefaultFabFactory<amrex::IArrayBox>()));
 
   amrex::iMultiFab* imf = ib_mask.back().get();
   int ghost_covered_by_valid = 0;

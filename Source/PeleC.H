@@ -18,6 +18,7 @@
 #include "PeleCUtilities.H"
 #include "Tagging.H"
 #include "IndexDefines.H"
+#include "NSCBC.H"
 #include "prob_parm.H"
 #include "PelePhysics.H"
 #include "ReactorBase.H"
@@ -92,6 +93,16 @@ public:
     amrex::Real time);
 
   ~PeleC() override;
+
+  // NSCBC accessors.  pc_bcfill_hyp is a free function and the runtime
+  // parameters are protected statics, so these exist to let the boundary
+  // filler capture its parameters HOST-side into a POD functor member.  A
+  // device kernel must never read a class static or ParmParse directly.
+  static bool nscbc_active() { return bc_nscbc; }
+  static pc_nscbc::Params nscbc_params(int idir);
+  // Report and reset the NSCBC fallback counters.  A silent fallback is a bug
+  // that will not be found; this is how it surfaces.
+  static void nscbc_report_diagnostics();
 
   // Restart from a checkpoint file.
   void restart(
