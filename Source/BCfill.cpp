@@ -461,17 +461,25 @@ PeleC::nscbc_report_diagnostics()
   // The supersonic path is exact, not a degradation, so it is reported but is
   // not a warning.  The others mean the boundary is being asked for something
   // it cannot cleanly provide.
+  // transverse_drop and source_drop belong here as much as the rest: a
+  // beta or beta_s that is silently not being applied looks exactly like a
+  // beta or beta_s that does nothing, and the only way to tell the two apart
+  // is to count it.
   const long total =
     static_cast<long>(h[pc_nscbc::Diag::reversed]) +
     h[pc_nscbc::Diag::body_state] + h[pc_nscbc::Diag::eos_failure] +
-    h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop];
+    h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop] +
+    h[pc_nscbc::Diag::source_drop];
   if (amrex::ParallelDescriptor::IOProcessor() && (total > 0 || verbose > 1)) {
     amrex::Print() << "  NSCBC fallbacks since last report:" << "  supersonic "
                    << h[pc_nscbc::Diag::supersonic] << ",  flow reversal "
                    << h[pc_nscbc::Diag::reversed] << ",  EB body state "
                    << h[pc_nscbc::Diag::body_state] << ",  EOS failure "
                    << h[pc_nscbc::Diag::eos_failure] << ",  floored "
-                   << h[pc_nscbc::Diag::floored] << "\n";
+                   << h[pc_nscbc::Diag::floored] << ",  transverse dropped "
+                   << h[pc_nscbc::Diag::transverse_drop]
+                   << ",  reaction source dropped "
+                   << h[pc_nscbc::Diag::source_drop] << "\n";
   }
   amrex::Gpu::Device::streamSynchronize();
   nscbc_diag().assign(pc_nscbc::Diag::count, 0);

@@ -75,7 +75,16 @@ adjustment is not miscounted as a reflected wave.
 | 0.50 | 1.43 | −15.0 | 5.75e−4 |
 | 1.00 | 2.56 | −26.8 | 2.87e−4 |
 | 2.00 | 4.18 | −43.5 | 1.44e−4 |
+| 4.00 | 7.20 | −60.3 | 7.19e−5 |
+| 8.00 | 14.97 | −69.3 | 3.59e−5 |
+| 16.00 | 28.14 | −70.8 | 1.80e−5 |
 | — (`pin_farfield`) | 0.015 | +0.010 | n/a (value pin) |
+
+The sweep runs past σ = 2 because `Exec/RegTests/NSCBC-FlameOutflow` needs
+σ ≈ 10 to anchor an outflow with a flame crossing it, and the price of that has
+to be quotable: 20-30% reflection, and a mean drift that has saturated — beyond
+σ ≈ 8 the anchoring stops improving while the reflection keeps growing, so
+σ > 16 buys nothing at all.
 
 Three things to read out of that table.
 

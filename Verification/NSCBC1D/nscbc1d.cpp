@@ -713,7 +713,7 @@ check_reflection(bool sweep)
     std::printf(
       "  %8s  %12s  %16s  %14s\n", "sigma", "R [%]", "p drift [dyn/cm2]",
       "tau_relax [s]");
-    for (Real s : {0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0, 2.0}) {
+    for (Real s : {0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0}) {
       Real d = 0.0;
       const Real R = reflection_coefficient(s, 400, 2, false, &d);
       const Real tau = (s > 0.0) ? Case().L / (s * 34783.7) : 0.0;

@@ -49,10 +49,16 @@ on the boundary.
 
 A 1-D flame cannot put its reaction sheet *on* an outflow without the flame
 leaving the domain. Testing the source term needs a configuration where the
-reaction zone crosses the boundary while the flame remains anchored — see
-`NSCBC-VFlame`, where a V-shaped flame's two branches sweep out through the
-downstream face at grazing incidence, which tests the transverse terms at the
-same time.
+reaction zone crosses the boundary — see `NSCBC-FlameOutflow`, where a wrinkled,
+unanchored sheet is parked on the outflow plane so that half the boundary is
+burnt and half is fresh, with the reaction zone in the boundary cells at the two
+crossings and the flame normal tilted 51° there.
+
+That case answers the question this one raised, and the answer is not the
+expected one: `beta_s` is still not what matters. At a front-crossing outflow
+the dominant error is a ghost-pressure bias driven by the *normal velocity
+gradient*, it is present with chemistry switched off, and `sigma` is the control
+that moves it.
 
 ## Two traps this case walked into
 

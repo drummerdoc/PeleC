@@ -134,7 +134,60 @@ single extra :math:`(\rho, e, Y) \rightarrow T` solve rather than one per specie
 significant figures (check C7 in ``Verification/NSCBC1D``).
 
 The correct first response to heat release at an outflow is still to **move the boundary**; this term is for when
-that is not possible.
+that is not possible. How little it buys you when that is not possible is the subject of the next section.
+
+What a front crossing the outflow actually costs
+""""""""""""""""""""""""""""""""""""""""""""""""
+
+``Exec/RegTests/NSCBC-FlameOutflow`` parks a wrinkled H\ :sub:`2`/air flame sheet on the outflow plane so that half
+the boundary is burnt, half is fresh, and the reaction zone lies in the boundary cells at the two crossings. Errors
+below are against a reference whose outflow is 2.4 cm further downstream, outside the domain of dependence of the
+comparison region, so the difference is the outflow's own error. :math:`R` is the acoustic reflection at the same
+:math:`\sigma` from ``Verification/NSCBC1D``.
+
+.. table::
+
+   ==============================  ==========  ==========  =============  ==========
+   Outflow                         :math:`\sigma`  :math:`\beta_s`  mean :math:`\Delta p`  :math:`R` [%]
+   ==============================  ==========  ==========  =============  ==========
+   hard ``p = p_amb``              --          --          --527          --
+   characteristic                  0.25        0           +2185          0.76
+   characteristic                  1           1           +2065          2.56
+   characteristic                  1           0           +2074          2.56
+   characteristic                  4           0           +1450          7.20
+   characteristic                  16          0           **+218**       28.1
+   ``pin_farfield``                --          0           +748           0.015
+   ==============================  ==========  ==========  =============  ==========
+
+in dyn/cm\ :sup:`2`, against :math:`p_{\rm amb} = 1.013\times10^6`. Three conclusions, none of them comfortable.
+
+**The reaction source term is not what matters here.** :math:`\beta_s` moves the error by under 1%, and the whole
+error is still present with ``pelec.do_react = 0``. The dominant mechanism is the ghost pressure. Per ghost layer
+:math:`\ell`,
+
+.. math::
+
+   p_g - p_N = \underbrace{\tfrac{1}{2}\rho c\, \ell\, \delta R_+}_{\rm extrapolation}
+             - \underbrace{\frac{\ell\,\sigma}{2 n_x}\,(p_N - p_\infty)}_{\rm anchoring} ,
+
+and the anchoring increment carries a factor :math:`1/n_x` that the extrapolation term does not. Balancing them,
+
+.. math::
+
+   \Delta p \;\approx\; \rho\, c\, L_{\rm ref} \left. \frac{\partial u_{\rm out}}{\partial n}\right|_{b} \Big/ \sigma .
+
+A **normal velocity gradient** at the boundary biases the ghost pressure, and :math:`\sigma` is the only thing
+fighting it. A flame crossing the outflow is a large such gradient — the gas accelerates from 45.6 to 123.8 cm/s
+across 0.07 cm — and it is dilatational, not acoustic, so the invariant algebra is not at fault: LODI has no way to
+tell the two apart. The formula predicts the measured :math:`\sigma^{-1}` trend, and predicts that the offset is
+grid-*converged* rather than refining away, which it is (:math:`n_x` = 48, 96, 192 give +531, +409, +371).
+
+**The inert default of** :math:`\sigma = 0.25` **is the worst available choice** in this situation, and only around
+:math:`\sigma \approx 10` does the characteristic outflow beat a hard pressure outflow — at roughly 20% acoustic
+reflection. You are choosing which error to have, not removing one.
+
+**``order = 2`` is load-bearing, not a refinement.** First order flips the sign and gives an error seven times
+larger than :math:`\sigma = 16`: extrapolating the outgoing invariant is what lets the front's structure leave.
 
 What is specified, and what is not
 """"""""""""""""""""""""""""""""""
@@ -266,7 +319,10 @@ The quality of a characteristic boundary condition is set more by where the boun
   thicknesses, downstream of any reaction zone. The modelled incoming wave carries no reaction-source term, so heat
   release in the boundary cell shows up as a mean pressure offset that :math:`\sigma` must absorb.
 * Avoid placing an outflow across a strong shear layer, a vortex core or a composition front. The acoustic impedance
-  :math:`\rho c` is frozen at the boundary cell, and that linearisation is weakest exactly there.
+  :math:`\rho c` is frozen at the boundary cell, and that linearisation is weakest exactly there. More to the point,
+  the mean-pressure error scales as :math:`\rho c L_{\rm ref} (\partial u_{\rm out}/\partial n) / \sigma` and does
+  not refine away — see *What a front crossing the outflow actually costs* above. Anything that puts a normal
+  velocity gradient on the boundary is expensive, and a flame is the most expensive of them.
 * Do not refine an AMR level at an outflow face. The residual reflection is :math:`O(\Delta x^p)` and the
   extrapolation stencil is level-local, so a fine patch on the boundary introduces a level-dependent artefact.
 * If a sponge or artificial-viscosity ramp is currently needed at an outflow, removing it is the acceptance test for
@@ -288,7 +344,14 @@ when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
                                                     well below the run time; or move the outflow away from
                                                     the flame.
    Reflects *and* drifts                            The boundary is sitting on a flame or shear layer. No
-                                                    dial fixes this; move it.
+                                                    dial fixes this; move it. If you cannot, raise
+                                                    :math:`\sigma` to O(10) and accept the reflection, or
+                                                    use ``pin_farfield`` and accept a fixed offset of order
+                                                    :math:`\rho c\, u_{\rm out}`.
+   Mean pressure off target at a reacting outflow,  Expected. :math:`\beta_s` is a second-order correction
+   and ``beta_s`` does not help                     on top of a first-order problem; the error is driven by
+                                                    :math:`\partial u_{\rm out}/\partial n`, not by the heat
+                                                    release. Raise :math:`\sigma`.
    Reflection persists at any :math:`\sigma`, 2-D    Missing transverse terms. Move the boundary further out.
    Inflow never reaches the target velocity         Increase ``relax_u``.
    Inflow oscillates or goes unstable               Reduce ``relax_u``; a value much above 10 is a hard
