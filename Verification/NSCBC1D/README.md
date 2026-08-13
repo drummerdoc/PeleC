@@ -20,7 +20,19 @@ cmake --build build
 
 Any AMReX build with `AMReX_SPACEDIM=1` works; MPI, OpenMP, EB and particles are
 all unnecessary. The default mechanism is `air` (2 species, Fuego); override
-with `-DPELE_MECHANISM=`.
+with `-DPELE_MECHANISM=`. Build it a second time against a reacting mechanism
+to exercise check C7, which is skipped otherwise:
+
+```sh
+cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
+cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 26/26
+```
+
+Nothing in the driver may assume a particular mechanism. The first version of
+`air_Y()` returned "0.233 for O2, else 0.767", which is right for the
+two-species `air` mechanism and gives a composition summing to 6.6 for
+LiDryer's nine — every check downstream then failed for reasons having nothing
+to do with the boundary condition.
 
 ## Units
 
@@ -41,6 +53,7 @@ relationships rather than on hard-coded numbers.
 | **C4** | Acoustic reflection of a pressure pulse: below 1% at σ=0.25, essentially zero at σ=0, and 2nd-order extrapolation no worse than 1st | The extrapolation or the invariant algebra is wrong |
 | **C5** | The relaxation is a **rate**: grid-independent, and equal to `K = σ(1−M²)c/L` | The parameterisation has drifted to a value-blend, whose effective rate scales as `c/Δx` and therefore doubles when the mesh does |
 | **C6** | Supersonic, reversed-flow and EB-body-state fallbacks each return a finite physical state and increment their counter | A silent fallback — i.e. a bug that will not be found in production |
+| **C7** | The closed-form reaction source `dp/dt|_react` matches a directional finite difference along the reaction path, converging as τ→0; chemistry conserves mass; a cold state gives zero | The thermodynamics of `reaction_dpdt()` is wrong. Skipped automatically when the mechanism has no reactions |
 
 ## Reference results
 

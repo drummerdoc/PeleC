@@ -331,10 +331,20 @@ check(bool ok, const std::string& name, const std::string& detail)
   }
 }
 
+// Air, for whatever mechanism this was built against.  Must not assume a
+// two-species mechanism: with LiDryer's nine species the old form
+// ("0.233 if O2 else 0.767") sums to well over one and every check downstream
+// fails for reasons that have nothing to do with the boundary condition.
 Real
 air_Y(int k)
 {
-  return (k == O2_ID) ? 0.233 : 0.767;
+  if (k == O2_ID) {
+    return 0.233;
+  }
+  if (k == N2_ID) {
+    return 0.767;
+  }
+  return 0.0;
 }
 
 } // namespace
@@ -879,6 +889,107 @@ check_fallbacks()
   check(finite, "covered boundary cell -> finite fallback", "state finite");
 }
 
+// C7: the reaction source term.  Chemistry changes the pressure only through
+//     the composition, so the closed-form expression in reaction_dpdt() is
+//     checked against a DIRECTIONAL finite difference along the reaction path
+//     at fixed rho and e -- refining tau, which should show first-order
+//     convergence toward the analytic value.  That FD is also exactly what the
+//     real-gas branch of reaction_dpdt() computes, so this validates both
+//     paths at once.
+void
+check_reaction_source()
+{
+#if NUM_REACTIONS == 0
+  std::printf(
+    "  SKIP  reaction source: %s has no reactions\n",
+    pele::physics::PhysicsType::identifier().c_str());
+#else
+  auto eos = pele::physics::PhysicsType::eos();
+  // Stoichiometric H2/air, hot enough to react briskly.
+  Real Y[NUM_SPECIES] = {0.0};
+  Y[H2_ID] = 0.0285;
+  Y[O2_ID] = 0.2265;
+  Y[N2_ID] = 0.7450;
+  const Real p0 = 1.01325e6, T0 = 1400.0;
+  Real rho = 0.0, e0 = 0.0;
+  eos.PYT2RE(p0, Y, T0, rho, e0);
+
+  Real s[NVAR];
+  set_state(s, rho, 0.0, T0, Y);
+  const pc_nscbc::CellPrim q = pc_nscbc::cell_primitives(s);
+  bool ok = true;
+  const Real analytic = pc_nscbc::reaction_dpdt(q, ok);
+
+  // Directional FD: Y'(tau) = Y + tau * wdot / rho, which preserves sum Y = 1
+  // because sum wdot = 0; then T' from (rho, e) and p' from (rho, T', Y').
+  Real wdot[NUM_SPECIES];
+  eos.RTY2WDOT(q.rho, q.T, q.Y, wdot);
+  Real wsum = 0.0, wmax = 0.0;
+  for (int n = 0; n < NUM_SPECIES; n++) {
+    wsum += wdot[n];
+    wmax = std::max(wmax, std::abs(wdot[n]));
+  }
+  auto fd = [&](Real tau) {
+    Real Yp[NUM_SPECIES], sum = 0.0;
+    for (int n = 0; n < NUM_SPECIES; n++) {
+      Yp[n] = std::max(q.Y[n] + tau * wdot[n] / q.rho, 0.0);
+      sum += Yp[n];
+    }
+    for (int n = 0; n < NUM_SPECIES; n++) {
+      Yp[n] /= sum;
+    }
+    Real Tp = q.T, pp = 0.0;
+    eos.REY2T(q.rho, q.e, Yp, Tp);
+    eos.RTY2P(q.rho, Tp, Yp, pp);
+    return (pp - q.p) / tau;
+  };
+
+  char buf[220];
+  std::snprintf(
+    buf, sizeof(buf), "|sum wdot| / max|wdot| = %.3e",
+    std::abs(wsum) / std::max(wmax, 1e-300));
+  check(
+    std::abs(wsum) / std::max(wmax, 1e-300) < 1e-10,
+    "chemistry conserves mass (sum wdot = 0)", buf);
+
+  const Real tau0 = 1.0e-6 / (wmax / q.rho);
+  Real prev_err = 1e300;
+  bool converging = true;
+  std::printf("      analytic dp/dt|_react = %.6e dyn/(cm^2 s)\n", analytic);
+  for (int k = 0; k < 4; k++) {
+    const Real tau = tau0 / std::pow(4.0, k);
+    const Real v = fd(tau);
+    const Real err = std::abs(v - analytic) / std::abs(analytic);
+    std::printf("      tau = %.3e  FD = %.6e  rel err = %.3e\n", tau, v, err);
+    if (k > 0 && err > prev_err * 1.05) {
+      converging = false;
+    }
+    prev_err = err;
+  }
+  std::snprintf(buf, sizeof(buf), "final relative error %.3e", prev_err);
+  check(
+    ok && prev_err < 1e-3, "closed-form dp/dt matches the directional FD", buf);
+  check(
+    converging, "FD converges toward the closed form as tau -> 0",
+    "error decreases monotonically");
+
+  // A frozen (cold) state must give exactly zero, so beta_s is a no-op there.
+  Real s_cold[NVAR];
+  Real rho_c = 0.0, e_c = 0.0;
+  eos.PYT2RE(p0, Y, 300.0, rho_c, e_c);
+  set_state(s_cold, rho_c, 0.0, 300.0, Y);
+  const pc_nscbc::CellPrim qc = pc_nscbc::cell_primitives(s_cold);
+  bool ok_c = true;
+  const Real cold = pc_nscbc::reaction_dpdt(qc, ok_c);
+  std::snprintf(
+    buf, sizeof(buf), "dp/dt = %.3e at 300 K vs %.3e at 1400 K", cold,
+    analytic);
+  check(
+    ok_c && std::abs(cold) < 1e-6 * std::abs(analytic),
+    "cold, unreacting state gives a negligible source", buf);
+#endif
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -902,6 +1013,8 @@ main(int argc, char* argv[])
     check_relaxation_rate();
     std::printf("\nC6  fallbacks\n");
     check_fallbacks();
+    std::printf("\nC7  reaction source term\n");
+    check_reaction_source();
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }

@@ -433,6 +433,7 @@ PeleC::nscbc_params(const int idir)
   p.relax_t = bc_nscbc_relax_t;
   p.order = bc_nscbc_order;
   p.beta = bc_nscbc_beta;
+  p.beta_s = bc_nscbc_beta_s;
   p.pin_farfield = bc_nscbc_pin_farfield;
   // Only the ratio sigma/L_ref is physical.  L_ref is fixed to the domain
   // extent along the boundary normal so that sigma keeps the meaning it has

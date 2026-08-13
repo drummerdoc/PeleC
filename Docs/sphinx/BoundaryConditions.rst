@@ -109,6 +109,33 @@ incidence.
 A negative :math:`\beta` selects the local Mach number, which is the legacy Fortran's convention. The measurements
 do not support it: at M = 0.2 it gives :math:`\beta = 0.2`, on the wrong side of the minimum.
 
+The reaction source term
+""""""""""""""""""""""""
+
+A flame near an outflow raises the pressure in the boundary cell at a rate the 1-D relaxation has no model for, so
+:math:`\sigma` has to absorb it and the mean pressure sits off target. ``pelec.bc_nscbc_beta_s`` adds the missing
+term, with the same convention as :math:`\beta`.
+
+It is worth knowing what this quantity is *not*. Chemistry conserves mass, and PeleC's constant-volume reactor
+conserves total internal energy because the formation enthalpies are carried inside :math:`e` — so the reaction
+contributes neither a density source nor a total-energy source, and ``srcq(QPRES)`` (which is built only from those
+two) is essentially zero for pure chemistry. The entire effect is compositional:
+
+.. math::
+
+   \left.\frac{\partial p}{\partial t}\right|_{\rm react}
+   = \sum_k \left.\frac{\partial p}{\partial Y_k}\right|_{\rho,e} \frac{\dot\omega_k}{\rho}
+   = R_u T \sum_k \frac{\dot\omega_k}{W_k} \;-\; \frac{p}{\rho T c_v}\sum_k e_k \dot\omega_k
+
+a mole-change term plus the familiar heat-release term. That closed form is exact for an ideal-gas mixture. For a
+real-gas EOS there is no such one-liner, so a directional finite difference along the reaction path is used instead;
+because :math:`\sum_k \dot\omega_k = 0` the perturbation already preserves :math:`\sum_k Y_k = 1`, so this costs a
+single extra :math:`(\rho, e, Y) \rightarrow T` solve rather than one per species. The two agree to eight
+significant figures (check C7 in ``Verification/NSCBC1D``).
+
+The correct first response to heat release at an outflow is still to **move the boundary**; this term is for when
+that is not possible.
+
 What is specified, and what is not
 """"""""""""""""""""""""""""""""""
 
@@ -144,6 +171,7 @@ needs to be changed.
    ``pelec.bc_nscbc_relax_u``          2.0        Inflow normal-velocity relaxation.
    ``pelec.bc_nscbc_relax_t``          0.2        Inflow temperature and tangential-velocity relaxation.
    ``pelec.bc_nscbc_beta``             1.0        Transverse-term weight. 1 = off; **try 0.5**.
+   ``pelec.bc_nscbc_beta_s``           1.0        Reaction-source weight. 1 = off.
    ``pelec.bc_nscbc_order``            2          Extrapolation order, 1 or 2. Verification knob only.
    ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
    ==================================  =========  ==========================================================

@@ -185,6 +185,27 @@ struct Params
   // gives beta = 0.2, which is on the wrong side of the minimum.
   amrex::Real beta = 1.0;
 
+  // Weight on the REACTION source term in the modelled incoming acoustic,
+  // with the same convention as beta:
+  //     L_in = K (phi - phi_target) - (1 - beta) T - (1 - beta_s) S_reaction
+  //   1  discard it -- the default, and the only correct choice when the
+  //      boundary is far enough from the flame that heat release there is
+  //      negligible
+  //   0  include it fully
+  //
+  // What this corrects.  A flame near an outflow raises the pressure in the
+  // boundary cell at a rate the 1-D relaxation has no model for, so sigma has
+  // to absorb it and the mean pressure sits off target.  S_reaction supplies
+  // the missing dp/dt.
+  //
+  // Note that this is NOT obtainable from PeleC's srcq(QPRES): that expression
+  // (Hydro.H) is built only from the density and internal-energy sources, and
+  // chemistry supplies neither -- mass is conserved and PeleC's constant-volume
+  // reactor conserves total energy because the formation enthalpies live inside
+  // e.  The entire effect is compositional, dp/dY|_{rho,e}, which srcq(QPRES)
+  // does not carry.  See reaction_dpdt() below.
+  amrex::Real beta_s = 1.0;
+
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
   // face by the caller.  Only the ratio sigma/L_ref is physical, so this is
   // not a user knob; it exists so that sigma keeps its literature meaning.
@@ -221,6 +242,10 @@ struct Params
     }
     if (relax_t < 0.0) {
       why = "bc_nscbc_relax_t must be >= 0";
+      return false;
+    }
+    if (beta_s > 1.0) {
+      why = "bc_nscbc_beta_s must be <= 1";
       return false;
     }
     if (beta > 1.0) {
@@ -304,6 +329,7 @@ enum : int {
   eos_failure,     // an EOS call returned a non-finite or non-positive value
   floored,         // a positivity floor was hit
   transverse_drop, // a transverse derivative was unavailable or unusable
+  source_drop,     // the reaction source term was unavailable or unusable
   count
 };
 }
@@ -410,6 +436,99 @@ cell_primitives(const amrex::Real s[NVAR]) noexcept
     q.ok = false;
   }
   return q;
+}
+
+// ---------------------------------------------------------------------------
+//  reaction_dpdt -- the rate of change of pressure at a cell due to chemistry
+//  alone, holding density and total internal energy fixed.
+//
+//  Chemistry conserves mass and, in PeleC's constant-volume reactor, total
+//  internal energy: the formation enthalpies are carried inside e.  So it
+//  changes the pressure entirely through the COMPOSITION,
+//
+//      dp/dt|_react = sum_k (dp/dY_k)|_{rho,e} * wdot_k / rho
+//
+//  For an ideal-gas mixture that derivative is available in closed form,
+//
+//      (dp/dY_k)|_{rho,e} = rho Ru T / W_k  -  (p/T)(e_k / c_v)
+//
+//  giving a mole-change term and the familiar heat-release term:
+//
+//      dp/dt = Ru T sum_k wdot_k/W_k  -  p/(rho T c_v) sum_k e_k wdot_k
+//
+//  For a real-gas EOS there is no such one-liner, and SRK does not implement
+//  the composition derivative at all.  The fallback exploits the fact that
+//  sum_k wdot_k = 0, so the composition perturbation along the reaction path
+//  already preserves sum Y = 1: a single DIRECTIONAL finite difference along
+//  that path gives exactly the required derivative, at the cost of one extra
+//  (rho, e, Y) -> T solve rather than NUM_SPECIES of them.
+// ---------------------------------------------------------------------------
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
+reaction_dpdt(CellPrim const& q, bool& ok) noexcept
+{
+  auto eos = pele::physics::PhysicsType::eos();
+  ok = true;
+
+  amrex::Real wdot[NUM_SPECIES];
+  eos.RTY2WDOT(q.rho, q.T, q.Y, wdot);
+  amrex::Real wmax = 0.0;
+  for (int n = 0; n < NUM_SPECIES; n++) {
+    if (!std::isfinite(wdot[n])) {
+      ok = false;
+      return 0.0;
+    }
+    wmax = amrex::max<amrex::Real>(wmax, std::abs(wdot[n]));
+  }
+  if (wmax <= 0.0) {
+    return 0.0; // frozen chemistry here; nothing to correct
+  }
+
+#if defined(USE_SRK_EOS) || defined(USE_MANIFOLD_EOS)
+  // Directional finite difference along the reaction path.
+  const amrex::Real dY_scale = wmax / q.rho; // [1/s]
+  const amrex::Real tau = 1.0e-6 / dY_scale; // gives max |dY| ~ 1e-6
+  amrex::Real Yp[NUM_SPECIES], sum = 0.0;
+  for (int n = 0; n < NUM_SPECIES; n++) {
+    Yp[n] = amrex::max<amrex::Real>(q.Y[n] + tau * wdot[n] / q.rho, 0.0);
+    sum += Yp[n];
+  }
+  if (!(sum > 0.0)) {
+    ok = false;
+    return 0.0;
+  }
+  for (int n = 0; n < NUM_SPECIES; n++) {
+    Yp[n] /= sum;
+  }
+  amrex::Real Tp = q.T, pp = 0.0;
+  eos.REY2T(q.rho, q.e, Yp, Tp);
+  eos.RTY2P(q.rho, Tp, Yp, pp);
+  if (!std::isfinite(pp) || !std::isfinite(Tp) || !(Tp > 0.0)) {
+    ok = false;
+    return 0.0;
+  }
+  return (pp - q.p) / tau;
+#else
+  amrex::Real imw[NUM_SPECIES], ei[NUM_SPECIES], cv = 0.0;
+  eos.inv_molecular_weight(imw);
+  eos.RTY2Ei(q.rho, q.T, q.Y, ei);
+  eos.RTY2Cv(q.rho, q.T, q.Y, cv);
+  if (!std::isfinite(cv) || !(cv > 0.0)) {
+    ok = false;
+    return 0.0;
+  }
+  amrex::Real mole_term = 0.0, heat_term = 0.0;
+  for (int n = 0; n < NUM_SPECIES; n++) {
+    mole_term += wdot[n] * imw[n];
+    heat_term += ei[n] * wdot[n];
+  }
+  const amrex::Real dpdt = pele::physics::Constants::RU * q.T * mole_term -
+                           q.p * heat_term / (q.rho * q.T * cv);
+  if (!std::isfinite(dpdt)) {
+    ok = false;
+    return 0.0;
+  }
+  return dpdt;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -710,6 +829,15 @@ apply(
       L_in = -K * qN.rho * c_N * (u_out_N - u_out_tgt);
     }
     L_in -= (1.0 - beta) * T_in;
+    if (prm.beta_s < 1.0) {
+      bool src_ok = true;
+      const amrex::Real S_p = reaction_dpdt(qN, src_ok);
+      if (src_ok) {
+        L_in -= (1.0 - prm.beta_s) * S_p;
+      } else {
+        bump(Diag::source_drop);
+      }
+    }
     Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dx_normal * L_in /
                     (lambda_in * rho_c);
   }
