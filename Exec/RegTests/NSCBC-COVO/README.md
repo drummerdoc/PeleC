@@ -139,9 +139,66 @@ That is the AMReX-side confirmation of check C1 in `Verification/NSCBC1D`, and
 it means every number above is a response to the flow rather than noise the
 boundary generates on its own.
 
-## Analysis tooling
+## Reproducing the numbers
 
-`Verification/NSCBC2D/fielddump.cpp` flattens one variable of a single-level 2-D
+`Verification/NSCBC2D/fielddump` flattens one variable of a single-level 2-D
 plotfile onto a regular array (`fextract` gives 1-D slices only, and the
-quantity of interest here is a shape). `Verification/NSCBC2D/metrics.py`
-computes the circularity and residual metrics from those dumps.
+quantity of interest here is a shape); `metrics.py` computes the metrics from
+those dumps. Build it with whichever system you used for PeleC — set `DIM` and
+`COMP` to match:
+
+```sh
+cd Verification/NSCBC2D
+make DIM=2 COMP=llvm -j                                       # GNUmake
+# or: cmake -S . -B build -DAMReX_DIR=<amrex>/lib/cmake/AMReX && cmake --build build
+```
+
+The runs. Each stops at step 3000, which is `t = 1.348e-3 s` — the vortex left
+at `t ~ 1.08e-3`, so `plt03000` is the "after it has gone" state every number
+in the vortex table refers to.
+
+```sh
+cd Exec/RegTests/NSCBC-COVO
+EXE=./PeleC2d.llvm.ex          # or whatever your build produced
+
+mkdir b05 && (cd b05 && $EXE ../nscbc-covo.inp pelec.bc_nscbc_beta=0.5)
+mkdir b10 && (cd b10 && $EXE ../nscbc-covo.inp pelec.bc_nscbc_beta=1.0)
+mkdir hard && (cd hard && $EXE ../nscbc-covo.inp pelec.bc_nscbc=0)
+```
+
+That trio already gives the headline comparison — 0.0176 / 0.0468 / 0.0652 —
+without needing any reference:
+
+```sh
+F=../../Verification/NSCBC2D/fielddump.gnu.ex
+for d in b05 b10 hard; do $F $d/plt03000 pressure $d.dat; done
+python3 ../../Verification/NSCBC2D/metrics.py residual 1013250.0 b05/plt00000.dat b05.dat b10.dat hard.dat
+```
+
+The **3.8×** additionally needs the no-boundary floor, which is a fourth run
+with the x faces made periodic so there is no boundary to get wrong:
+
+```sh
+mkdir per && (cd per && $EXE ../nscbc-covo.inp \
+    geometry.is_periodic="1 1" pelec.lo_bc="Interior Interior" \
+    pelec.hi_bc="Interior Interior" pelec.bc_nscbc=0)
+```
+
+The vortex never leaves in that run, so the floor is not the residual itself but
+the difference between the final field and the initial field shifted by `u t`:
+
+```python
+import numpy as np, sys
+sys.path.insert(0, "../../Verification/NSCBC2D")
+from metrics import load
+x, y, a0, _  = load("per0.dat")       # fielddump of per/plt00000
+x, y, a1, t1 = load("per.dat")        # fielddump of per/plt03000
+u  = 0.2 * 34719.02257                # M * c, printed by amrex_probinit
+dx = x[1] - x[0]; L = x[-1] - x[0] + dx
+n  = ((u * t1) % L) / dx; i0 = int(n); f = n - i0
+ref = (1 - f) * np.roll(a0, i0, axis=1) + f * np.roll(a0, i0 + 1, axis=1)
+print(np.sqrt(((a1 - ref) ** 2).mean()) / 1.89811e4)   # -> 0.0047
+```
+
+Then `3.8 = 0.0176 / 0.0047`. Note the shift interpolation contributes to that
+floor, so the true floor is lower and every ratio quoted here is conservative.
