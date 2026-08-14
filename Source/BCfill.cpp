@@ -379,7 +379,7 @@ pc_bcfill_hyp(
 
   const ProbParmDevice* lprobparm = PeleC::d_prob_parm_device;
 
-  // Capture the NSCBC parameters HOST-side (CAMR lesson: a device kernel must
+  // Capture the NSCBC parameters HOST-side (a device kernel must
   // never touch ParmParse or a class static).
   const bool nscbc = PeleC::nscbc_active();
   amrex::GpuArray<pc_nscbc::Params, AMREX_SPACEDIM> nscbc_prm;

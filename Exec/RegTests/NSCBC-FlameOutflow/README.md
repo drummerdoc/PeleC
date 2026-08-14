@@ -195,3 +195,52 @@ here — see `NSCBC-PMF/README.md`. The inputs file sets it explicitly to 1.
 earlier attempt at this measurement. It compiles and initialises but has not
 been used for a measurement; the wrinkled sheet superseded it because it needs
 no anchor, no apex geometry and no steady state to wait for.
+
+## Locating the reaction zone
+
+Use a radical, not the temperature. The temperature midpoint sits in the preheat
+zone, which is wide and diffusion-controlled; the radical peak sits in the
+reaction zone, which is the thing that actually has to be inside the boundary
+cells for `beta_s` to have anything to correct. `radicals.py` does both the
+front-position tracking and the boundary-column profile.
+
+Along the outflow column at t = 24 µs, H₂/air, σ = 1:
+
+```
+  y [cm]    T [K]         Y_H        Y_OH    q [erg/cm3/s]
+  0.0031      299   1.494e-17   4.342e-14        9.387e+00
+  0.1031      644   1.963e-07   4.007e-06        2.337e+08
+  0.1281     1008   2.348e-05   2.532e-04        5.549e+09
+  0.2531     1215   5.116e-05   9.520e-04        5.961e+09
+  0.3781      301   6.946e-17   2.304e-13        8.336e+01
+```
+
+Twelve orders of magnitude in `Y_H` and nine in the heat release, along a single
+column of boundary cells, with the two peaks at the two designed crossings. That
+is the case doing what it claims.
+
+The radical is also the better front tracker for the stability question below,
+because the peak is 2–3 cells wide where the temperature midpoint is a ramp over
+ten.
+
+## Is the measurement contaminated by thermodiffusive instability?
+
+A fair question of the H₂ case: at φ = 0.4, Le(H₂) ≈ 0.3, so an imposed wrinkle
+is thermodiffusively unstable and would grow. It does not, because there is no
+time for it to. Tracking the front by the H peak:
+
+| t [s] | mean x_f [cm] | wrinkle half-amplitude [cm] |
+|---|---|---|
+| 0 | 0.65294 | 0.07990 |
+| 9.78e−6 | 0.65262 | 0.07896 |
+| 2.40e−5 | 0.65247 | 0.07809 |
+
+The amplitude *decays* 2.3% over the run. The Darrieus–Landau e-folding time at
+this wavenumber is ~9×10⁻³ s and the flame time δ/S_L is 3×10⁻³ s, against a
+measurement window of 2.4×10⁻⁵ s — 130 to 390 times shorter than either. The
+boundary equilibrates on the acoustic time, which is what makes the measurement
+possible at all, and the flame is frozen on that time.
+
+`NSCBC-FlameOutflow-DRM` runs the same problem with CH₄/air at φ = 0.75
+(drm19, Le(CH₄) = 0.97, thermodiffusively neutral) and settles the question by
+construction rather than by argument.

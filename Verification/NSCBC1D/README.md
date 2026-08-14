@@ -96,7 +96,7 @@ perfectly non-reflecting and completely unanchored. This is the curve that makes
 **The relaxation is a genuine rate.** Doubling and quadrupling the resolution
 changes the measured `K` by 3% (1925 → 1861 s⁻¹ from n=200 to n=800), and the
 measured value sits within 7% of `σc/L`. A boundary condition parameterised as a
-*value blend* instead — CAMR's `PS_nscbc.H` is one — has an effective rate of
+*value blend* instead has an effective rate of
 `c/Δx`, which doubles when the mesh does, so its σ is not transferable and its
 behaviour is not grid-converged. Keeping this check green is what keeps
 literature σ values meaningful in PeleC.

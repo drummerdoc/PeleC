@@ -729,7 +729,7 @@ check_reflection(bool sweep)
 
 // C5: the relaxation rate must be a RATE -- grid-independent, and equal to
 //     K = sigma (1-M^2) c / L.  This is the check that distinguishes the
-//     Poinsot-Lele parameterisation adopted here from CAMR's value-blend,
+//     Poinsot-Lele parameterisation adopted here, as against a value-blend,
 //     whose effective rate is c/dx and therefore doubles when the mesh does.
 void
 check_relaxation_rate()

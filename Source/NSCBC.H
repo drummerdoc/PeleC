@@ -69,15 +69,21 @@
 //
 //  Two notes on what this is NOT:
 //
-//    1. Transverse terms ARE available, weighted by Params::beta -- see the
-//       guidance on that member; the optimum is near 0.5 and the failure mode
-//       below ~0.3 is severe.  The reaction and viscous source contributions
-//       are NOT available: they need sources_for_hydro, which does not exist
-//       during FillPatch.  With
-//       beta = 1 (the default) the transverse terms are discarded too and this
-//       is the pure 1-D-normal LODI limit.  Either way, place an outflow away
-//       from flames: heat release in the boundary cell has no model here and
-//       shows up as a mean pressure offset.
+//    1. Transverse terms are available, weighted by Params::beta, and the
+//       reaction source is available, weighted by Params::beta_s -- see the
+//       guidance on those members.  Both are computed cell-locally from the
+//       boundary cell and its tangential neighbours, so neither needs
+//       sources_for_hydro (which does not exist during FillPatch).  The
+//       VISCOUS source is genuinely absent.  With beta = beta_s = 1 (the
+//       defaults) both are discarded and this is the pure 1-D-normal LODI
+//       limit.
+//
+//       Neither correction rescues an outflow placed on a flame.  Measured in
+//       Exec/RegTests/NSCBC-FlameOutflow, beta_s moves the mean pressure error
+//       there by under 1%, because the dominant error is not the heat release:
+//       it is a ghost-pressure bias driven by the normal velocity gradient,
+//       dp ~ rho c L_ref (du_out/dn) / sigma, which is present with chemistry
+//       switched off entirely.  Place outflows where the flow is smooth.
 //
 //       That the transverse terms fit here at all is a consequence of writing
 //       the relaxation as a GRADIENT increment: they are additive on
@@ -219,11 +225,11 @@ struct Params
   int order = 2;
 
   // Replace the Poinsot-Lele relaxation of the incoming acoustic by a hard pin
-  // of R_- to the far-field value (u_out = 0, p = p_target).  This is the
-  // formulation used by CAMR's PS_nscbc.H.  It is simultaneously non-reflecting
-  // and anchored, but it anchors to p_target + rho c u_out rather than to
-  // p_target, and it is a value constraint rather than a rate, so its effective
-  // relaxation rate is c/dx -- i.e. it does not converge under grid refinement.
+  // of R_- to the far-field value (u_out = 0, p = p_target).  It is
+  // simultaneously non-reflecting and anchored, but it anchors to
+  // p_target + rho c u_out rather than to p_target, and it is a value
+  // constraint rather than a rate, so its effective relaxation rate is c/dx
+  // -- i.e. it does not converge under grid refinement.
   // Right for an open boundary onto a large quiescent reservoir; wrong for a
   // duct exhausting into a plenum whose true mean pressure is not p_target.
   // sigma is ignored when this is set.
@@ -814,7 +820,7 @@ apply(
 
   amrex::Real Rm_g;
   if (outflow_face && prm.pin_farfield) {
-    // CAMR-style hard pin: R_- takes its far-field value (u_out = 0,
+    // Hard far-field pin: R_- takes its far-field value (u_out = 0,
     // p = p_target).  Value constraint, not a rate, and there is nowhere in it
     // to put a transverse term -- so pin_farfield ignores beta.
     Rm_g = -tgt.p / rho_c;
