@@ -23,7 +23,7 @@ Given all that, the reference restricted to the test domain is the exact
 solution there, and the difference -- INCLUDING its mean level, which must not
 be subtracted -- is the test run's outflow error.
 
-Needs `fielddump` from Verification/NSCBC2D on PATH or via --fielddump.
+Needs `fielddump` from Verification/NSCBCFields on PATH or via --fielddump.
 """
 import argparse
 import os
@@ -72,7 +72,7 @@ def main():
                     help="comparison time [s]; must be inside the causal "
                          "window of the reference")
     ap.add_argument("--fielddump", default="fielddump",
-                    help="path to Verification/NSCBC2D/fielddump")
+                    help="path to Verification/NSCBCFields/fielddump")
     ap.add_argument("--layer", type=int, default=16,
                     help="near-boundary width in cells for the local norms")
     a = ap.parse_args()

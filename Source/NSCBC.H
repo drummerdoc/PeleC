@@ -103,6 +103,34 @@
 //  sign handling is internal here.  Params::validate() rejects negatives.
 //
 //  ---------------------------------------------------------------------------
+//  GPU PORTABILITY
+//  ---------------------------------------------------------------------------
+//  Finiteness guards use amrex::Math::isfinite, NOT std::isfinite. AMReX_Math.H
+//  documents why: SYCL's fast-math makes std::isfinite evaluate to false even
+//  at -O1.  Every use of it in this file is a guard of the form
+//
+//      if (!isfinite(x)) { fall back; bump(counter); }
+//
+//  so under a SYCL build with std::isfinite EVERY guard would fire and the
+//  boundary would silently degrade to a zero-gradient copy -- correct-looking
+//  code producing a quietly different boundary condition on one vendor's GPUs.
+//  The diagnostic counters would at least make it visible, which is the second
+//  reason they exist.
+//
+//  There is no dynamic allocation, no virtual dispatch, no recursion, and no
+//  printf or Abort on the device path; the fallback counters are incremented
+//  with amrex::HostDevice::Atomic::Add.
+//
+//  The one cost worth knowing about is stack footprint.  The caller holds
+//  4*NVAR doubles of stencil and ghost state plus 2*(D-1)*NVAR of tangential
+//  neighbours, and apply() adds three CellPrim plus the species work arrays --
+//  order 10*NVAR doubles per thread in 3-D, which is 2.2 kB for a 21-species
+//  mechanism and 4.8 kB for a 53-species one.  That exceeds the 255-register
+//  budget and will spill to local memory.  It is tolerable because the launch
+//  is over a thin ghost region rather than the whole domain, but it is the
+//  first thing to look at if a boundary fill ever shows up in a GPU profile.
+//
+//  ---------------------------------------------------------------------------
 //  EOS PORTABILITY
 //  ---------------------------------------------------------------------------
 //  Only density-carrying ("R...") EOS entry points are used:
@@ -117,6 +145,7 @@
 #include <AMReX_REAL.H>
 #include <AMReX_GpuQualifiers.H>
 #include <AMReX_Algorithm.H>
+#include <AMReX_Math.H>
 #include <cmath>
 
 #include "IndexDefines.H"
@@ -286,8 +315,8 @@ struct Params
 struct Target
 {
   Type type = Type::off;
-  amrex::Real p = 0.0;                // outflow: target pressure [Pa]
-  amrex::Real u[3] = {0.0, 0.0, 0.0}; // inflow: target velocity [m/s]
+  amrex::Real p = 0.0;                // outflow: target pressure [dyn/cm^2]
+  amrex::Real u[3] = {0.0, 0.0, 0.0}; // inflow: target velocity [cm/s]
   amrex::Real T = 0.0;                // inflow: target temperature [K]
   amrex::Real Y[NUM_SPECIES] = {0.0}; // inflow: target mass fractions
 };
@@ -347,7 +376,7 @@ enum : int {
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
 finite_or(const amrex::Real x, const amrex::Real fallback) noexcept
 {
-  return std::isfinite(x) ? x : fallback;
+  return amrex::Math::isfinite(x) ? x : fallback;
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
@@ -367,8 +396,8 @@ minmod(const amrex::Real a, const amrex::Real b) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE bool
 is_body_state(const amrex::Real s[NVAR]) noexcept
 {
-  return !(s[URHO] > constants::very_small_num()) || !std::isfinite(s[URHO]) ||
-         !std::isfinite(s[UEDEN]);
+  return !(s[URHO] > constants::very_small_num()) ||
+         !amrex::Math::isfinite(s[URHO]) || !amrex::Math::isfinite(s[UEDEN]);
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE void
@@ -428,7 +457,7 @@ cell_primitives(const amrex::Real s[NVAR]) noexcept
   q.e = s[UEDEN] * rhoinv - ke;
 
   q.T = s[UTEMP];
-  if (!(q.T > 0.0) || !std::isfinite(q.T)) {
+  if (!(q.T > 0.0) || !amrex::Math::isfinite(q.T)) {
     q.T = 300.0; // initial guess for the iterative fallback
     eos.REY2T(q.rho, q.e, q.Y, q.T);
   }
@@ -437,8 +466,9 @@ cell_primitives(const amrex::Real s[NVAR]) noexcept
   eos.RTY2Cs(q.rho, q.T, q.Y, q.c);
 
   if (
-    !std::isfinite(q.p) || !(q.p > 0.0) || !std::isfinite(q.c) ||
-    !(q.c > 0.0) || !std::isfinite(q.T) || !(q.T > 0.0)) {
+    !amrex::Math::isfinite(q.p) || !(q.p > 0.0) ||
+    !amrex::Math::isfinite(q.c) || !(q.c > 0.0) ||
+    !amrex::Math::isfinite(q.T) || !(q.T > 0.0)) {
     q.ok = false;
   }
   return q;
@@ -479,7 +509,7 @@ reaction_dpdt(CellPrim const& q, bool& ok) noexcept
   eos.RTY2WDOT(q.rho, q.T, q.Y, wdot);
   amrex::Real wmax = 0.0;
   for (int n = 0; n < NUM_SPECIES; n++) {
-    if (!std::isfinite(wdot[n])) {
+    if (!amrex::Math::isfinite(wdot[n])) {
       ok = false;
       return 0.0;
     }
@@ -508,7 +538,7 @@ reaction_dpdt(CellPrim const& q, bool& ok) noexcept
   amrex::Real Tp = q.T, pp = 0.0;
   eos.REY2T(q.rho, q.e, Yp, Tp);
   eos.RTY2P(q.rho, Tp, Yp, pp);
-  if (!std::isfinite(pp) || !std::isfinite(Tp) || !(Tp > 0.0)) {
+  if (!amrex::Math::isfinite(pp) || !amrex::Math::isfinite(Tp) || !(Tp > 0.0)) {
     ok = false;
     return 0.0;
   }
@@ -518,7 +548,7 @@ reaction_dpdt(CellPrim const& q, bool& ok) noexcept
   eos.inv_molecular_weight(imw);
   eos.RTY2Ei(q.rho, q.T, q.Y, ei);
   eos.RTY2Cv(q.rho, q.T, q.Y, cv);
-  if (!std::isfinite(cv) || !(cv > 0.0)) {
+  if (!amrex::Math::isfinite(cv) || !(cv > 0.0)) {
     ok = false;
     return 0.0;
   }
@@ -529,7 +559,7 @@ reaction_dpdt(CellPrim const& q, bool& ok) noexcept
   }
   const amrex::Real dpdt = pele::physics::Constants::RU * q.T * mole_term -
                            q.p * heat_term / (q.rho * q.T * cv);
-  if (!std::isfinite(dpdt)) {
+  if (!amrex::Math::isfinite(dpdt)) {
     ok = false;
     return 0.0;
   }
@@ -690,7 +720,9 @@ apply(
     if (tgt.type == Type::inflow) {
       amrex::Real rho_g = 0.0, e_g = 0.0;
       eos.PYT2RE(tgt.p > 0.0 ? tgt.p : qN.p, tgt.Y, tgt.T, rho_g, e_g);
-      if (std::isfinite(rho_g) && (rho_g > 0.0) && std::isfinite(e_g)) {
+      if (
+        amrex::Math::isfinite(rho_g) && (rho_g > 0.0) &&
+        amrex::Math::isfinite(e_g)) {
         amrex::Real u_g[3] = {tgt.u[0], tgt.u[1], tgt.u[2]};
         pack_ghost(rho_g, u_g, e_g, tgt.T, tgt.Y, s_N, s_ghost);
         bump(Diag::supersonic);
@@ -714,7 +746,9 @@ apply(
     amrex::Real T_g = qN.T, e_g = 0.0;
     eos.RYP2T(qN.rho, qN.Y, tgt.p, T_g);
     eos.RTY2E(qN.rho, T_g, qN.Y, e_g);
-    if (!std::isfinite(T_g) || !(T_g > 0.0) || !std::isfinite(e_g)) {
+    if (
+      !amrex::Math::isfinite(T_g) || !(T_g > 0.0) ||
+      !amrex::Math::isfinite(e_g)) {
       bump(Diag::eos_failure);
       copy_state(s_N, s_ghost);
       return;
@@ -806,13 +840,13 @@ apply(
       div_ut += dutdt;
       any = true;
     }
-    if (any && std::isfinite(gam) && (gam > 0.0)) {
+    if (any && amrex::Math::isfinite(gam) && (gam > 0.0)) {
       T_in += gam * qN.p * div_ut;
     } else {
       T_in = 0.0;
       bump(Diag::transverse_drop);
     }
-    if (!std::isfinite(T_in)) {
+    if (!amrex::Math::isfinite(T_in)) {
       T_in = 0.0;
       bump(Diag::transverse_drop);
     }
@@ -854,11 +888,11 @@ apply(
 
   const amrex::Real p_floor = amrex::max<amrex::Real>(
     1.0e-3 * (tgt.p > 0.0 ? tgt.p : qN.p), constants::very_small_num());
-  if (!std::isfinite(p_g) || (p_g < p_floor)) {
+  if (!amrex::Math::isfinite(p_g) || (p_g < p_floor)) {
     p_g = p_floor;
     bump(Diag::floored);
   }
-  if (!std::isfinite(u_out_g)) {
+  if (!amrex::Math::isfinite(u_out_g)) {
     u_out_g = u_out_N;
     bump(Diag::floored);
   }
@@ -926,7 +960,7 @@ apply(
 
     const amrex::Real rho_floor =
       amrex::max<amrex::Real>(1.0e-6 * qN.rho, constants::very_small_num());
-    if (!std::isfinite(rho_g) || (rho_g < rho_floor)) {
+    if (!amrex::Math::isfinite(rho_g) || (rho_g < rho_floor)) {
       rho_g = rho_floor;
       bump(Diag::floored);
     }
@@ -974,7 +1008,7 @@ apply(
       }
       bump(Diag::floored);
     }
-    if (!std::isfinite(T_g) || !(T_g > 0.0)) {
+    if (!amrex::Math::isfinite(T_g) || !(T_g > 0.0)) {
       T_g = qN.T;
       bump(Diag::floored);
     }
@@ -983,8 +1017,9 @@ apply(
   }
 
   if (
-    !std::isfinite(rho_g) || !(rho_g > 0.0) || !std::isfinite(e_g) ||
-    !std::isfinite(T_g) || !(T_g > 0.0)) {
+    !amrex::Math::isfinite(rho_g) || !(rho_g > 0.0) ||
+    !amrex::Math::isfinite(e_g) || !amrex::Math::isfinite(T_g) ||
+    !(T_g > 0.0)) {
     bump(Diag::eos_failure);
     copy_state(s_N, s_ghost);
     return;
@@ -994,7 +1029,7 @@ apply(
   pack_ghost(rho_g, u_g, e_g, T_g, Y_g, s_N, s_ghost);
 
   for (int n = 0; n < NVAR; n++) {
-    if (!std::isfinite(s_ghost[n])) {
+    if (!amrex::Math::isfinite(s_ghost[n])) {
       s_ghost[n] = s_N[n];
       bump(Diag::floored);
     }

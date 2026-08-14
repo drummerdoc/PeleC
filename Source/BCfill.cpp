@@ -8,13 +8,27 @@
 
 namespace {
 // Device-resident fallback counters for the characteristic boundary
-// treatment.  Allocated once, reduced and reported by
+// treatment.  Allocated on first use, reduced and reported by
 // PeleC::nscbc_report_diagnostics().
+//
+// Held as a heap pointer released through amrex::ExecOnFinalize rather than as
+// a function-local static object.  A static Gpu::DeviceVector destructs at
+// program exit, which is AFTER amrex::Finalize() has torn down the arena it
+// allocated from -- harmless on a CPU build and a use-after-free of the device
+// allocator on a GPU one.
+amrex::Gpu::DeviceVector<int>* nscbc_diag_p = nullptr;
+
 amrex::Gpu::DeviceVector<int>&
 nscbc_diag()
 {
-  static amrex::Gpu::DeviceVector<int> d(pc_nscbc::Diag::count, 0);
-  return d;
+  if (nscbc_diag_p == nullptr) {
+    nscbc_diag_p = new amrex::Gpu::DeviceVector<int>(pc_nscbc::Diag::count, 0);
+    amrex::ExecOnFinalize([]() {
+      delete nscbc_diag_p;
+      nscbc_diag_p = nullptr;
+    });
+  }
+  return *nscbc_diag_p;
 }
 } // namespace
 
@@ -388,8 +402,9 @@ pc_bcfill_hyp(
   }
   int* diag = nscbc ? nscbc_diag().data() : nullptr;
 
-  amrex::GpuBndryFuncFab<PCHypFillExtDir> hyp_bndry_func(PCHypFillExtDir{
-    lprobparm, PeleC::turb_inflow.is_initialized(), nscbc, nscbc_prm, diag});
+  amrex::GpuBndryFuncFab<PCHypFillExtDir> hyp_bndry_func(
+    PCHypFillExtDir{
+      lprobparm, PeleC::turb_inflow.is_initialized(), nscbc, nscbc_prm, diag});
   hyp_bndry_func(bx, data, dcomp, numcomp, geom, time, bcr, bcomp, scomp);
 }
 

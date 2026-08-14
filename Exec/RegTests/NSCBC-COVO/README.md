@@ -141,14 +141,14 @@ boundary generates on its own.
 
 ## Reproducing the numbers
 
-`Verification/NSCBC2D/fielddump` flattens one variable of a single-level 2-D
+`Verification/NSCBCFields/fielddump` flattens one variable of a single-level 2-D
 plotfile onto a regular array (`fextract` gives 1-D slices only, and the
 quantity of interest here is a shape); `metrics.py` computes the metrics from
 those dumps. Build it with whichever system you used for PeleC — set `DIM` and
 `COMP` to match:
 
 ```sh
-cd Verification/NSCBC2D
+cd Verification/NSCBCFields
 make DIM=2 COMP=llvm -j                                       # GNUmake
 # or: cmake -S . -B build -DAMReX_DIR=<amrex>/lib/cmake/AMReX && cmake --build build
 ```
@@ -170,9 +170,9 @@ That trio already gives the headline comparison — 0.0176 / 0.0468 / 0.0652 —
 without needing any reference:
 
 ```sh
-F=../../Verification/NSCBC2D/fielddump.gnu.ex
+F=../../Verification/NSCBCFields/fielddump.gnu.ex
 for d in b05 b10 hard; do $F $d/plt03000 pressure $d.dat; done
-python3 ../../Verification/NSCBC2D/metrics.py residual 1013250.0 b05/plt00000.dat b05.dat b10.dat hard.dat
+python3 ../../Verification/NSCBCFields/metrics.py residual 1013250.0 b05/plt00000.dat b05.dat b10.dat hard.dat
 ```
 
 The **3.8×** additionally needs the no-boundary floor, which is a fourth run
@@ -189,7 +189,7 @@ the difference between the final field and the initial field shifted by `u t`:
 
 ```python
 import numpy as np, sys
-sys.path.insert(0, "../../Verification/NSCBC2D")
+sys.path.insert(0, "../../Verification/NSCBCFields")
 from metrics import load
 x, y, a0, _  = load("per0.dat")       # fielddump of per/plt00000
 x, y, a1, t1 = load("per.dat")        # fielddump of per/plt03000

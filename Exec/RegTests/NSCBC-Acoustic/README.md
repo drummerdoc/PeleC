@@ -58,3 +58,86 @@ having both.
   non-reflecting and anchored but does not converge under mesh refinement.
 * Refine `amr.n_cell` and confirm R does not grow: the relaxation is a rate,
   not a per-cell value blend, so it is grid-converged.
+
+## Three dimensions
+
+The same sources build in 1-D, 2-D and 3-D — `AMREX_SPACEDIM`, `AMREX_D_DECL`,
+`AMREX_D_TERM` and `AMREX_D_EXPR` throughout — so only the inputs file changes.
+The 2-D planar result is unmoved: mean pressure at the end is 1013178.3 with a
+hard boundary and 1013241.8 with the characteristic one, the same to the last
+printed digit as before the conversion.
+
+| inputs | what it is |
+|---|---|
+| `nscbc-acoustic.inp` | 2-D planar; the historical regression |
+| `nscbc-acoustic-3d.inp` | 3-D planar; confirms the kernel builds and runs in 3-D |
+| `nscbc-acoustic-3d-radial.inp` | 3-D radial, **all six faces characteristic** |
+
+### Why the radial case exists
+
+A planar pulse loads one face at normal incidence, which is what the 2-D run
+already tests. It says nothing about a ghost cell that lies outside the domain
+in two or three directions at once — and that is the part of `BCfill.cpp` with
+no 1-D analogue, so the standalone driver cannot reach it either.
+
+A radial pulse reaches the six faces at normal incidence, the twelve edges at
+45°, and the eight corners along the body diagonal, in one run. Because the
+initial condition is exactly isotropic about the box centre, **any** departure
+from sphericity in the departing front is boundary-generated; no reference
+solution is needed to say so.
+
+`metrics.py sphericity` reports the spread in the front radius over ~4000
+directions, binned by χ, the angle to the nearest face normal: χ = 0 is a face
+centre, 45° an edge, 54.7° a corner. Rays whose front has already left are
+dropped, so as time goes on the surviving rays are exactly the oblique ones.
+
+### What it measures
+
+`c = 34719 cm/s`, box 5 cm, 96³. The front reaches the faces at 7.2×10⁻⁵ s, the
+edges at 1.02×10⁻⁴ and the corners at 1.25×10⁻⁴.
+
+| t [s] | rays | χ range | radius spread % | amplitude spread % |
+|---|---|---|---|---|
+| | | | NSCBC / hard | NSCBC / hard |
+| 3.0×10⁻⁵ | 4000 | all | 7.355 / 7.355 | 1.782 / 1.782 |
+| 6.0×10⁻⁵ | 4000 | all | 2.891 / 2.891 | 5.158 / 5.157 |
+| 7.5×10⁻⁵ | 2260 | edges + corners | 1.964 / 2.452 | **4.70 / 7.34** |
+| 9.0×10⁻⁵ | 555 | corners | 1.291 / 1.612 | **7.69 / 40.29** |
+| 1.05×10⁻⁴ | 25 | corners | 0.600 / 0.523 | **2.25 / 22.14** |
+
+Read the first two rows first: before the front reaches any face the two runs
+are **identical to six figures**, as they must be, since nothing has touched the
+boundary yet. That is the metric's own sanity check, and it is why the later
+rows can be believed.
+
+After the face crossing they separate, and the discriminator is the **amplitude**
+spread, not the radius: the front arrives at the right time either way, but a
+hard boundary corrupts its strength. At 9×10⁻⁵ s — corner-bound rays only, the
+face and edge parts of the wave already gone — the amplitude around the
+surviving arc varies by 40% with a hard boundary and 7.7% with the
+characteristic one.
+
+So corner and edge ownership works. The `apply()` algebra is dimension-agnostic
+by construction, and this says the plumbing around it is too.
+
+### Two things this case turned up
+
+**The flow-reversal fallback is not hypothetical.** Running with
+`pelec.sum_interval > 0`, the counters read zero everywhere until the pulse
+leaves and then report `flow reversal 11456` in a 40-step window. That is
+correct physics, not a bug: the rarefaction behind an outgoing spherical wave
+pulls the pressure below ambient and draws gas back in through faces configured
+as outflows. The kernel detects it and switches to the ambient-pressure closure,
+which keeps the interior composition and tangential velocity so a grazing flow
+is not arrested — and the run is stable through it. Before this case, that path
+had only ever been exercised by a synthetic state in check C6.
+
+**It also caps the benefit.** For cells in reversal the boundary is effectively a
+pressure Dirichlet, so it is not non-reflecting there. That is why the residual
+after the wave has gone improves only ~1.5× over a hard boundary here
+(L2 0.038 vs 0.056 of the incident amplitude) against 120× for the planar case.
+If a problem spends a lot of its time in reversal at an outflow, the honest fix
+is to give that face an inflow target rather than to expect the outflow model to
+cope. The residual number is also not purely boundary error in this case: the
+imploding half of the split pulse passes through the origin and is still in the
+box at the final time.
