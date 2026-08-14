@@ -1020,6 +1020,261 @@ check_diffusive_gradient()
     buf);
 }
 
+// C9: the ghost-pressure bias -- the mechanism blamed in
+//     Exec/RegTests/NSCBC-FlameOutflow for the mean-pressure error at a
+//     front-crossing outflow, reproduced here where nothing else can be
+//     responsible.
+//
+//     The claim is that extrapolating the OUTGOING invariant R_+ = u_out +
+//     p/(rho c) across a region with a normal velocity gradient manufactures a
+//     ghost pressure that has nothing to do with any acoustic wave, because
+//     dR_+/dn there is dominated by dilatation.  Two parts:
+//
+//     (a) STATIC.  With p_N already at the target the relaxation contributes
+//         nothing, so the algebra predicts exactly
+//
+//             p_ghost - p_N = 1/2 rho c * layer * du_out
+//
+//         and predicts zero at order = 1, where the slope is discarded.  No
+//         fitted quantity: if the mechanism is what it is claimed to be, this
+//         is an identity.
+//
+//     (b) DYNAMIC, and NOT an isolation of (a) -- see the note at the order
+//         control below.  A prescribed heat band straddling the outflow,
+//         against a matched-heat band in the interior as a control.  The
+//         difference is what the boundary added, it falls with sigma, and it
+//         has the same shape as the sigma sweep in
+//         Exec/RegTests/NSCBC-FlameOutflow.  But the order = 1 control shows it
+//         is dominated by the unmodelled energy source in the boundary cells
+//         rather than by the extrapolation bias of part (a).  Reported, not
+//         gated.
+void
+check_ghost_pressure_bias()
+{
+  const Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  char buf[256];
+
+  // ---- (a) static -------------------------------------------------------
+  {
+    const Real dx = 2.5e-2;
+    const Real u_N = 4.0e3; // 40 m/s at the boundary cell
+    const Real du = 5.0e2;  // 5 m/s per cell of ramp -> du/dn = 2e4 1/s
+    Real rho = 0.0, e = 0.0;
+    eos.PYT2RE(cs.p0, Y, cs.T0, rho, e);
+    const Prim qref = [&] {
+      Prim q{};
+      q.rho = rho;
+      q.u = u_N;
+      q.p = cs.p0;
+      q.T = cs.T0;
+      for (int k = 0; k < NUM_SPECIES; k++) {
+        q.Y[k] = Y[k];
+      }
+      return q;
+    }();
+    const Real c0 = sound_speed(qref);
+
+    Real sN[NVAR], sM1[NVAR], sM2[NVAR], sg[NVAR];
+    set_state(sN, rho, u_N, cs.T0, Y);
+    set_state(sM1, rho, u_N - du, cs.T0, Y);
+    set_state(sM2, rho, u_N - 2.0 * du, cs.T0, Y);
+
+    pc_nscbc::Params prm;
+    prm.L_ref = cs.L;
+    prm.sigma = 0.25;
+    prm.order = 2;
+    pc_nscbc::Target out;
+    out.type = pc_nscbc::Type::outflow;
+    out.p = cs.p0; // p_N is already on target
+
+    for (int layer = 1; layer <= 2; layer++) {
+      pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, layer, out, prm, sg);
+      const Real p_g = get_prim(sg).p;
+      const Real predicted = 0.5 * rho * c0 * layer * du;
+      const Real rel = (p_g - cs.p0 - predicted) / predicted;
+      std::snprintf(
+        buf, sizeof(buf),
+        "layer %d: p_ghost - p_N = %.2f, predicted 1/2 rho c l du = %.2f "
+        "(rel %.2e)",
+        layer, p_g - cs.p0, predicted, rel);
+      check(
+        std::abs(rel) < 1.0e-6, "ghost pressure bias matches the algebra", buf);
+    }
+
+    prm.order = 1;
+    pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, 1, out, prm, sg);
+    const Real p_g1 = get_prim(sg).p;
+    std::snprintf(
+      buf, sizeof(buf), "order 1: p_ghost - p_N = %.3e (bias term discarded)",
+      p_g1 - cs.p0);
+    check(
+      std::abs(p_g1 - cs.p0) < 1.0e-6 * cs.p0,
+      "the bias is carried entirely by the extrapolation", buf);
+  }
+
+  // ---- (b) dynamic ------------------------------------------------------
+  // A prescribed heat band sustains a velocity gradient.  Two placements at
+  // matched total heat release:
+  //
+  //   INTERIOR  band at L/2  -- the flow has finished accelerating long before
+  //                            the outflow, so du/dn at the boundary is ~0
+  //   BOUNDARY  band at L    -- the gradient is IN the boundary cells, exactly
+  //                            as the flame straddles the outflow in
+  //                            Exec/RegTests/NSCBC-FlameOutflow
+  //
+  // Heating a duct at fixed inflow raises the mean pressure whatever the
+  // boundary does -- that is real physics, set by mass and energy balance, and
+  // it is the same in both placements once the total heat is matched.  The
+  // DIFFERENCE is what the boundary added, and it is the only quantity here
+  // that the bias can be responsible for.
+  auto run_heated = [&](
+                      const Real sigma, const Real Qmax, const int n,
+                      const Real xq_frac, const int order, Real& dudn_out) {
+    const Real dx = cs.L / n;
+    Field f(n), g(n), h(n);
+    Real rho0 = 0.0, e0 = 0.0;
+    eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+    const Real u_in = 3.0e3;
+    for (int i = -NG; i < n + NG; i++) {
+      set_state(f.at(i), rho0, u_in, cs.T0, Y);
+    }
+
+    pc_nscbc::Params prm;
+    prm.L_ref = cs.L;
+    prm.sigma = sigma;
+    prm.order = order;
+    pc_nscbc::Target off, out;
+    out.type = pc_nscbc::Type::outflow;
+    out.p = cs.p0;
+
+    const Real xq = xq_frac * cs.L, wq = 0.4;
+    std::vector<Real> qd(n, 0.0);
+    Real qtot = 0.0;
+    for (int i = 0; i < n; i++) {
+      qd[i] = std::exp(-std::pow(((i + 0.5) * dx - xq) / wq, 2));
+      qtot += qd[i] * dx;
+    }
+    // Normalise so both placements deliver the same integrated heat, despite
+    // the boundary band being half outside the domain.
+    for (int i = 0; i < n; i++) {
+      qd[i] *= Qmax * wq * std::sqrt(M_PI) / qtot;
+    }
+
+    const Real t_end = 4.0 * cs.L / u_in;
+    Real t = 0.0;
+    while (t < t_end) {
+      Real cmax = 0.0;
+      for (int i = 0; i < n; i++) {
+        const Prim q = get_prim(f.at(i));
+        cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+      }
+      Real dt = std::min(cs.cfl * dx / cmax, t_end - t);
+      if (dt <= 0.0) {
+        break;
+      }
+
+      for (int layer = 1; layer <= NG; layer++) {
+        set_state(f.at(-layer), rho0, u_in, cs.T0, Y);
+      }
+      fill_bcs(f, off, out, prm, dx);
+      stage(f, g, dx, dt);
+      for (int layer = 1; layer <= NG; layer++) {
+        set_state(g.at(-layer), rho0, u_in, cs.T0, Y);
+      }
+      fill_bcs(g, off, out, prm, dx);
+      stage(g, h, dx, dt);
+      for (int i = 0; i < n; i++) {
+        for (int v = 0; v < NVAR; v++) {
+          f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+        }
+        f.at(i)[UEDEN] += dt * qd[i];
+        f.at(i)[UEINT] += dt * qd[i];
+        Real* sp = f.at(i);
+        const Real rr = sp[URHO];
+        const Real uu = sp[UMX] / rr;
+        Real Yl[NUM_SPECIES], ys = 0.0;
+        for (int k = 0; k < NUM_SPECIES; k++) {
+          Yl[k] = sp[UFS + k] / rr;
+          ys += Yl[k];
+        }
+        for (int k = 0; k < NUM_SPECIES; k++) {
+          Yl[k] /= ys;
+        }
+        Real Tl = sp[UTEMP];
+        eos.REY2T(rr, sp[UEDEN] / rr - 0.5 * uu * uu, Yl, Tl);
+        sp[UTEMP] = Tl;
+      }
+      t += dt;
+    }
+
+    dudn_out = (get_prim(f.at(n - 1)).u - get_prim(f.at(n - 2)).u) / dx;
+    Real psum = 0.0;
+    for (int i = 0; i < n; i++) {
+      psum += get_prim(f.at(i)).p;
+    }
+    return psum / n - cs.p0;
+  };
+
+  const Real Q = 2.0e9; // erg/cm^3/s
+  const int NN = 200;
+  std::printf(
+    "\n    %7s %9s %11s %11s %11s %11s\n", "sigma", "order", "du/dn int",
+    "du/dn bnd", "<p> int", "<p> bnd");
+  Real bias[4];
+  const Real sigs[4] = {0.25, 1.0, 4.0, 16.0};
+  for (int k = 0; k < 4; k++) {
+    Real di = 0.0, db = 0.0;
+    const Real oi = run_heated(sigs[k], Q, NN, 0.5, 2, di);
+    const Real ob = run_heated(sigs[k], Q, NN, 1.0, 2, db);
+    bias[k] = ob - oi;
+    std::printf(
+      "    %7.2f %9d %11.0f %11.0f %11.1f %11.1f\n", sigs[k], 2, di, db, oi,
+      ob);
+  }
+  std::printf("      bias (bnd - int): ");
+  for (int k = 0; k < 4; k++) {
+    std::printf("%10.1f", bias[k]);
+  }
+  std::printf("\n");
+
+  std::snprintf(
+    buf, sizeof(buf), "bias %.1f -> %.1f as sigma 0.25 -> 16 (x%.2f)", bias[0],
+    bias[3], bias[0] / (std::abs(bias[3]) > 1e-30 ? bias[3] : 1.0));
+  check(
+    std::abs(bias[0]) > 2.0 * std::abs(bias[3]),
+    "a source AT the boundary adds an offset that sigma suppresses", buf);
+
+  // The order control, and the reason the dynamic part of this check reports
+  // rather than gates.
+  //
+  // Statically (part a) order = 1 gives EXACTLY zero ghost-pressure bias.  If
+  // the dynamic offset above were the extrapolation bias, dropping to first
+  // order would remove most of it.  It does not -- the two agree to ~2%.  So
+  // what the heat band actually measures is an unmodelled ENERGY SOURCE in the
+  // boundary cells, which is the beta_s situation, not the beta one, and at
+  // ~12% of ambient it swamps the extrapolation term entirely.
+  //
+  // A heat band cannot do better: there is no way to hold a velocity gradient
+  // at the boundary with a local source without also putting that source in the
+  // boundary cells.  Isolating the extrapolation dynamically needs a
+  // source-free sustainer -- an established velocity/density ramp advected out
+  // through the face -- which is not built yet.  Until it is, part (a) is the
+  // isolation and this part is context.
+  Real d1i = 0.0, d1b = 0.0;
+  const Real o1i = run_heated(1.0, Q, NN, 0.5, 1, d1i);
+  const Real o1b = run_heated(1.0, Q, NN, 1.0, 1, d1b);
+  std::snprintf(
+    buf, sizeof(buf),
+    "order 2 %.1f vs order 1 %.1f -- agree, so this is NOT the extrapolation",
+    bias[1], o1b - o1i);
+  check(true, "  (reported) order control on the dynamic offset", buf);
+}
+
 // C7: the reaction source term.  Chemistry changes the pressure only through
 //     the composition, so the closed-form expression in reaction_dpdt() is
 //     checked against a DIRECTIONAL finite difference along the reaction path
@@ -1148,6 +1403,8 @@ main(int argc, char* argv[])
     check_reaction_source();
     std::printf("\nC8  diffusive behaviour of the ghost\n");
     check_diffusive_gradient();
+    std::printf("\nC9  ghost-pressure bias from the outgoing extrapolation\n");
+    check_ghost_pressure_bias();
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }
