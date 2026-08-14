@@ -331,6 +331,15 @@ check(bool ok, const std::string& name, const std::string& detail)
   }
 }
 
+// A measurement worth recording that is not a pass/fail criterion: either the
+// prediction it would test cannot be isolated in the configuration available,
+// or the number is diagnostic rather than normative.
+void
+report(const std::string& name, const std::string& detail)
+{
+  std::printf("  ....  %-46s %s\n", name.c_str(), detail.c_str());
+}
+
 // Air, for whatever mechanism this was built against.  Must not assume a
 // two-species mechanism: with LiDryer's nine species the old form
 // ("0.233 if O2 else 0.767") sums to well over one and every check downstream
@@ -1275,6 +1284,219 @@ check_ghost_pressure_bias()
   check(true, "  (reported) order control on the dynamic offset", buf);
 }
 
+// C10: does the ghost-pressure bias of C9(a) actually DRIVE the solution?
+//
+//      C9(a) establishes the bias exactly, but statically.  C9(b) tried to make
+//      it dynamic with a heat source and failed: a source strong enough to hold
+//      a velocity gradient at the boundary also deposits energy there, and the
+//      order control showed the source, not the extrapolation, setting the
+//      offset.  C10 removes every source instead.
+//
+//      The sustainer is a steady-flame structure with the chemistry taken out:
+//      uniform mass flux rho*u, velocity rising through a tanh ramp by an
+//      expansion ratio, density falling to match, and the pressure carrying the
+//      momentum flux so that rho*u^2 + p is uniform as well.  It straddles the
+//      outflow, exactly as the sheet does in Exec/RegTests/NSCBC-FlameOutflow.
+//      Truth is the identical initial condition on a domain five times longer,
+//      whose own outflow is 40 cm from the common region -- far enough that
+//      going from three times to five times longer moved the answer by 0.1 in
+//      9754, which is the shielding argument checked rather than asserted.
+//
+//      THE RESULT IS NEGATIVE, AND IT IS THE POINT OF THE CHECK.  A source-free
+//      expansion cannot be sustained in a constant-area duct.  Mass, momentum
+//      and energy together admit no smooth steady state with du/dx != 0: with
+//      rho*u and rho*u^2 + p held uniform the energy flux still varies as
+//      (cp/R) p du/dx ~ 3.5e6 * du/dx, which is ~20% of rho*E per 3e-4 s.  The
+//      run confirms it -- du/dn at the measurement point falls from 449 to -2
+//      in the REFERENCE, whose boundary is 40 cm away and cannot be blamed.  A
+//      flame's expansion is held up by its heat release; take the chemistry out
+//      and the expansion does not survive long enough to be advected out.
+//
+//      So the two quantitative predictions from C9(a) -- error proportional to
+//      du_out, error proportional to 1/sigma -- cannot be tested here, and are
+//      reported rather than gated.  C9(b) and C10 are the two horns: hold the
+//      gradient with a source and the source dominates; remove the source and
+//      the gradient does not persist.
+//
+//      What survives is the order control, which changes ONLY the outgoing
+//      extrapolation and leaves everything else identical.  Source-free it
+//      moves the accumulated pressure error by 5x (1477 -> 7591), so the
+//      extrapolation does drive the solution.  But the sign is the opposite of
+//      the one assumed: order 1, which has no slope and therefore none of the
+//      C9(a) bias, is five times WORSE.  Removing the bias term is not a fix.
+//      Likewise sigma: relaxing harder toward p_inf makes the error grow, not
+//      shrink, because p_inf is not the correct pressure while a structure is
+//      crossing the boundary.
+void
+check_extrapolation_drives_solution()
+{
+  const Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  char buf[256];
+
+  const int n = 200;      // cells over cs.L = 10 cm, so dx = 0.05 cm
+  const Real dx = cs.L / n;
+  const Real u0 = 3.0e2;  // cm/s, M ~ 0.01: quasi-frozen
+  const Real wr = 1.0;    // ramp half-width, cm -- 20 cells, and wide enough
+                          // that advecting it 0.2 cm leaves the gradient at the
+                          // boundary essentially unchanged over the run
+  const Real t_end = 3.0e-4; // ~1 relaxation time at sigma = 1
+  const int NS = 6;          // history samples
+
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+  const Real mdot = rho0 * u0;
+
+  // The ramp, centred on the outflow face at x = cs.L.
+  auto uofx = [&](const Real x, const Real ratio) {
+    const Real g = 0.5 * (1.0 + std::tanh((x - cs.L) / wr));
+    return u0 * (1.0 + (ratio - 1.0) * g);
+  };
+
+  // Fill `nc` cells.  rho*u is uniform, and the pressure carries the momentum
+  // flux so that rho*u^2 + p is uniform too -- otherwise the initial state is
+  // out of momentum balance by mdot*u0*(ratio-1) and rings acoustically from
+  // the first step for reasons that have nothing to do with the boundary.
+  auto init = [&](Field& f, const int nc, const Real ratio) {
+    for (int i = -NG; i < nc + NG; i++) {
+      const Real x = (i + 0.5) * dx;
+      const Real u = uofx(x, ratio);
+      const Real rho = mdot / u;
+      const Real p = cs.p0 + mdot * (u0 - u);
+      Real T = 0.0;
+      eos.RYP2T(rho, Y, p, T);
+      set_state(f.at(i), rho, u, T, Y);
+    }
+  };
+
+  // Advance `nc` cells to t_end with a characteristic outflow, sampling the
+  // mean pressure over the FIRST n cells (the region the short and the long
+  // domain share) and du/dn at the outflow face at NS times.
+  auto run = [&](const int nc, const Real sigma, const int order,
+                 const Real ratio, Real* pm, Real* gr) {
+    Field f(nc), g(nc), h(nc);
+    init(f, nc, ratio);
+
+    pc_nscbc::Params prm;
+    prm.L_ref = nc * dx;
+    prm.sigma = sigma;
+    prm.order = order;
+    pc_nscbc::Target off, out;
+    out.type = pc_nscbc::Type::outflow;
+    out.p = cs.p0;
+
+    auto sample = [&](const int k) {
+      Real psum = 0.0;
+      for (int i = 0; i < n; i++) {
+        psum += get_prim(f.at(i)).p;
+      }
+      pm[k] = psum / n;
+      gr[k] = (get_prim(f.at(n - 1)).u - get_prim(f.at(n - 2)).u) / dx;
+    };
+
+    Real t = 0.0;
+    int k = 0;
+    sample(k++);
+    while (k < NS) {
+      const Real t_next = t_end * static_cast<Real>(k) / (NS - 1);
+      while (t < t_next) {
+        Real cmax = 0.0;
+        for (int i = 0; i < nc; i++) {
+          const Prim q = get_prim(f.at(i));
+          cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+        }
+        Real dt = std::min(cs.cfl * dx / cmax, t_next - t);
+        if (dt <= 0.0) {
+          break;
+        }
+        // Fixed inflow: this test is about the outflow only.
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(f.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(f, off, out, prm, dx);
+        stage(f, g, dx, dt);
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(g.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(g, off, out, prm, dx);
+        stage(g, h, dx, dt);
+        for (int i = 0; i < nc; i++) {
+          for (int v = 0; v < NVAR; v++) {
+            f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+          }
+        }
+        t += dt;
+      }
+      sample(k++);
+    }
+  };
+
+  // One shielded reference per (sigma, order, ratio).  Its own outflow is 40 cm
+  // from the common region: the expanded gas reaches ~1200 K, where c ~ 7e4
+  // cm/s, so 20 cm would only just be shielded over t_end and 40 cm is not.
+  auto err = [&](const Real sigma, const int order, const Real ratio,
+                 Real* eh, Real* gh, Real* gr) {
+    Real pr[NS], pt[NS];
+    run(5 * n, sigma, order, ratio, pr, gr);
+    run(n, sigma, order, ratio, pt, gh);
+    for (int k = 0; k < NS; k++) {
+      eh[k] = pt[k] - pr[k];
+    }
+  };
+
+  Real eh[NS], gh[NS], gr[NS];
+  auto row = [&](const Real sigma, const int order, const Real ratio) {
+    err(sigma, order, ratio, eh, gh, gr);
+    std::printf("    %6.2f %6d %6.1f  ", sigma, order, ratio);
+    for (int k = 1; k < NS; k++) {
+      std::printf(" %9.1f", eh[k]);
+    }
+    std::printf(
+      "   | du/dn %5.0f ->%5.0f (ref %5.0f ->%5.0f)\n", gh[0], gh[NS - 1],
+      gr[0], gr[NS - 1]);
+    return eh[NS - 1];
+  };
+
+  std::printf("\n    %6s %6s %6s   %s\n", "sigma", "order", "ratio",
+              "<p>-<p>_ref at t_end/5 .. t_end");
+
+  // --- prediction 1: error proportional to du_out ------------------------
+  const Real e_r2 = row(1.0, 2, 2.0);
+  const Real g_r2 = gh[0];
+  const Real e_r4 = row(1.0, 2, 4.0);
+  const Real g_r4 = gh[0];
+  const Real g_ratio = g_r4 / (std::abs(g_r2) > 1e-30 ? g_r2 : 1.0);
+  const Real e_ratio = e_r4 / (std::abs(e_r2) > 1e-30 ? e_r2 : 1.0);
+  std::snprintf(
+    buf, sizeof(buf),
+    "du/dn(0) x%.2f -> error x%.2f -- not a law, the ramp is gone by t_end",
+    g_ratio, e_ratio);
+  report("error vs the velocity gradient", buf);
+
+  // --- prediction 2: error proportional to 1/sigma -----------------------
+  const Real e_lo = row(0.5, 2, 4.0);
+  row(2.0, 2, 4.0);
+  const Real e_hi = row(8.0, 2, 4.0);
+  std::snprintf(
+    buf, sizeof(buf),
+    "sigma 0.5 -> 8 (x16): error %.1f -> %.1f -- stronger relaxation is WORSE",
+    e_lo, e_hi);
+  report("error vs the relaxation strength", buf);
+
+  // --- the order control, which is the whole point -----------------------
+  const Real e_o1 = row(1.0, 1, 4.0);
+  std::snprintf(
+    buf, sizeof(buf), "order 2 error %.1f, order 1 error %.1f (order 1 worse)",
+    e_r4, e_o1);
+  check(
+    std::abs(e_o1 - e_r4) > 0.25 * std::abs(e_r4),
+    "the outgoing extrapolation drives the solution", buf);
+}
+
 // C7: the reaction source term.  Chemistry changes the pressure only through
 //     the composition, so the closed-form expression in reaction_dpdt() is
 //     checked against a DIRECTIONAL finite difference along the reaction path
@@ -1405,6 +1627,8 @@ main(int argc, char* argv[])
     check_diffusive_gradient();
     std::printf("\nC9  ghost-pressure bias from the outgoing extrapolation\n");
     check_ghost_pressure_bias();
+    std::printf("\nC10 does that bias drive the solution? (source-free)\n");
+    check_extrapolation_drives_solution();
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }
