@@ -457,6 +457,7 @@ PeleC::nscbc_params(const int idir)
   // probhi(idir) and was therefore silently wrong for any domain not
   // anchored at the origin.
   const auto& geom = amrex::DefaultGeometry();
+  p.extrap_temperature = bc_nscbc_extrap_temperature;
   p.L_ref = geom.ProbHi(idir) - geom.ProbLo(idir);
   return p;
 }

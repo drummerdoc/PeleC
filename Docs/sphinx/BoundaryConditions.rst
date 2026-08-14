@@ -59,11 +59,12 @@ provide it is unaffected. A face must be ``Hard`` or ``UserBC`` for the treatmen
 
 .. note::
 
-   By default (``bc_nscbc_beta = 1``) the implementation is the **1-D-normal LODI limit**: the modelled incoming
-   waves carry no transverse terms. Setting :math:`\beta < 1` enables them and is worth a factor of a few whenever
-   the boundary is met obliquely — see *Transverse terms* below. The reaction- and viscous-source corrections are
-   not available at all, because they need data that does not exist during ``FillPatch``; place an outflow away
-   from flames regardless. See *Where to put the boundary*.
+   By default (``bc_nscbc_beta = bc_nscbc_beta_s = 1``) the implementation is the **1-D-normal LODI limit**: the
+   modelled incoming waves carry neither transverse nor reaction terms. Setting :math:`\beta < 1` enables the
+   transverse terms and is worth a factor of a few whenever the boundary is met obliquely — see *Transverse terms*
+   below. :math:`\beta_s < 1` enables the reaction source. The **viscous** contribution to the incoming wave is
+   genuinely absent. Place an outflow away from flames regardless: see *What a front crossing the outflow actually
+   costs*, which makes that advice quantitative rather than folkloric.
 
 Transverse terms
 """"""""""""""""""""
@@ -227,6 +228,7 @@ needs to be changed.
    ``pelec.bc_nscbc_beta_s``           1.0        Reaction-source weight. 1 = off.
    ``pelec.bc_nscbc_order``            2          Extrapolation order, 1 or 2. Verification knob only.
    ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
+   ``pelec.bc_nscbc_extrap_temperature`` 0        Give the outflow face a controlled conductive flux.
    ==================================  =========  ==========================================================
 
 **All of these are positive.** The legacy Fortran implementation required ``relax_T`` to be negative and its
@@ -260,6 +262,21 @@ for a 1-D pulse; the usual band is 0.15-0.3. :math:`\sigma = 0` is *perfectly* n
 pressure entirely unanchored.
 
 ``bc_nscbc_pin_farfield`` replaces the relaxation by a hard pin of the incoming invariant to its far-field value.
+
+``bc_nscbc_extrap_temperature`` addresses something the characteristic algebra does not: PeleC's diffusion operator forms
+the conductive and species fluxes at a physical boundary face from the NSCBC ghost cells, so whatever normal temperature
+gradient the ghost carries *is* the heat flux leaving the domain. By default the outflow closes its :math:`\lambda_0`
+family on the linearised entropy invariant, and the ghost temperature is then whatever the EOS returns from the
+extrapolated density and the acoustically-set pressure — chosen by nothing that has a heat flux in mind. Check C8 in
+``Verification/NSCBC1D`` measures the consequence on a flame-like ramp: the face temperature gradient is overstated by
+**40%**. Setting this to 1 extrapolates the temperature on the same limited slope as everything else and derives the
+density from the EOS, so the face gradient is the interior one exactly, at no cost on the hyperbolic side (a uniform
+state is still reproduced to round-off).
+
+It is off by default because it changes every outflow result. Turn it on when a thermal or compositional structure is
+near the boundary. In ``Exec/RegTests/NSCBC-FlameOutflow`` it is worth 9% at :math:`\sigma = 1`, where the ghost-pressure
+bias still dominates, and 69% at :math:`\sigma = 16`, where that bias is suppressed and the diffusive error is most of
+what remains — taking the mean-pressure error to 67 dyn/cm², eight times *better* than a hard pressure outflow.
 That is simultaneously non-reflecting and anchored, which a rate-based relaxation cannot be, but it anchors to
 :math:`p_{\rm target} + \rho c u_n` rather than to :math:`p_{\rm target}`, and because it constrains a *value*
 rather than a rate its effective relaxation rate is :math:`c/\Delta x` and it does not converge under mesh

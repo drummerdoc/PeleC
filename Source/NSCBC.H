@@ -45,8 +45,10 @@
 //  R_+(N) - R_+(N-1) would be a difference of two different variables and its
 //  use as a slope would be meaningless.
 //
-//  Outgoing quantities (R_+ always; S, u_t, Y, scalars at an outflow) are
+//  Outgoing quantities (R_+ always; S or T, u_t, Y, scalars at an outflow) are
 //  extrapolated outward from the interior with a minmod-limited linear slope.
+//  Which of S or T is extrapolated is Params::extrap_temperature -- see there;
+//  it matters because the diffusion operator reads these same ghost cells.
 //  Incoming quantities are set from a target state through the classical
 //  Poinsot-Lele relaxation:
 //
@@ -240,6 +242,33 @@ struct Params
   // e.  The entire effect is compositional, dp/dY|_{rho,e}, which srcq(QPRES)
   // does not carry.  See reaction_dpdt() below.
   amrex::Real beta_s = 1.0;
+
+  // Close the lambda_0 family on TEMPERATURE rather than on the linearised
+  // entropy invariant S = rho - p/c^2.
+  //
+  // Both are legitimate: the lambda_0 family carries entropy, and T is a
+  // function of (rho, p, Y), so extrapolating either one and deriving the other
+  // closes the family.  For a smooth flow they agree to first order.  They do
+  // NOT agree across a steep temperature ramp, and the difference matters for a
+  // reason that has nothing to do with the hyperbolic problem: PeleC's
+  // diffusion operator forms the conductive and species fluxes at a physical
+  // boundary face from these ghost cells, so whatever normal temperature
+  // gradient the ghost carries IS the heat flux leaving the domain.
+  //
+  // With the entropy closure, T is whatever the EOS returns from the
+  // extrapolated rho and the acoustically-set p, and nothing constrains its
+  // gradient.  Check C8 in Verification/NSCBC1D measures the consequence on a
+  // flame-like ramp (2e4 K/cm): the ghost overstates the face temperature
+  // gradient by 40%.  With this set, T is extrapolated with the same
+  // minmod-limited slope as everything else and rho follows from the EOS, so
+  // the conductive flux at the face is a controlled continuation of the
+  // interior one.
+  //
+  // Default false: the entropy closure is the historical behaviour and the
+  // textbook one, and switching it changes every outflow result, so it is
+  // opt-in.  Turn it on when a thermal or compositional structure is anywhere
+  // near the boundary.
+  bool extrap_temperature = false;
 
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
   // face by the caller.  Only the ratio sigma/L_ref is physical, so this is
@@ -935,6 +964,14 @@ apply(
     const amrex::Real S_g = S_N + fl * dS;
     rho_g = S_g + p_g * inv_c2;
 
+    // Temperature closure: extrapolate T on the same limited slope and let rho
+    // follow from the EOS below, so that the face temperature gradient is the
+    // interior one rather than a by-product of the acoustic algebra.
+    amrex::Real dT = 0.0;
+    if (prm.extrap_temperature && linear && qNm1.ok && qNm2.ok) {
+      dT = minmod(qN.T - qNm1.T, qNm1.T - qNm2.T);
+    }
+
     amrex::Real Ysum = 0.0;
     for (int n = 0; n < NUM_SPECIES; n++) {
       Y_g[n] = amrex::max<amrex::Real>(qN.Y[n] + fl * dY[n], 0.0);
@@ -958,14 +995,27 @@ apply(
       }
     }
 
-    const amrex::Real rho_floor =
-      amrex::max<amrex::Real>(1.0e-6 * qN.rho, constants::very_small_num());
-    if (!amrex::Math::isfinite(rho_g) || (rho_g < rho_floor)) {
-      rho_g = rho_floor;
-      bump(Diag::floored);
+    if (prm.extrap_temperature) {
+      T_g = qN.T + fl * dT;
+      // A temperature floor rather than a density one: rho is the derived
+      // quantity in this closure.
+      const amrex::Real T_floor =
+        amrex::max<amrex::Real>(1.0e-3 * qN.T, constants::very_small_num());
+      if (!amrex::Math::isfinite(T_g) || (T_g < T_floor)) {
+        T_g = T_floor;
+        bump(Diag::floored);
+      }
+      eos.PYT2RE(p_g, Y_g, T_g, rho_g, e_g);
+    } else {
+      const amrex::Real rho_floor =
+        amrex::max<amrex::Real>(1.0e-6 * qN.rho, constants::very_small_num());
+      if (!amrex::Math::isfinite(rho_g) || (rho_g < rho_floor)) {
+        rho_g = rho_floor;
+        bump(Diag::floored);
+      }
+      eos.RYP2T(rho_g, Y_g, p_g, T_g);
+      eos.RTY2E(rho_g, T_g, Y_g, e_g);
     }
-    eos.RYP2T(rho_g, Y_g, p_g, T_g);
-    eos.RTY2E(rho_g, T_g, Y_g, e_g);
   } else {
     // Inflow.  A single dimensionless nudge factor is shared by the
     // temperature and the tangential velocities: both ride lambda_0, whose

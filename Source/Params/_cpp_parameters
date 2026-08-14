@@ -145,6 +145,16 @@ bc_nscbc_order              int           2
 # pressure is not the target.  bc_nscbc_sigma is ignored when this is set.
 bc_nscbc_pin_farfield       bool          false
 
+# Close the lambda_0 family at an outflow on TEMPERATURE rather than on the
+# linearised entropy invariant.  Matters because PeleC's diffusion operator
+# forms the boundary-face conductive and species fluxes from the NSCBC ghost
+# cells, and with the entropy closure the ghost temperature is a by-product of
+# the acoustic algebra: check C8 in Verification/NSCBC1D measures a 40%
+# overstatement of the face temperature gradient on a flame-like ramp.  Turn it
+# on when a thermal or compositional structure is near the boundary.  Default
+# false because it changes every outflow result.
+bc_nscbc_extrap_temperature bool          false
+
 # NOTE: pelec.nscbc_adv and pelec.nscbc_diff were removed here.  They were
 # declared and queried but never read by any live code path -- the
 # Ghost-Cell NSCBC implementation they controlled was deleted with the rest

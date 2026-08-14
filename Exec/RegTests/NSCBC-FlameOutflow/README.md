@@ -244,3 +244,44 @@ possible at all, and the flame is frozen on that time.
 `NSCBC-FlameOutflow-DRM` runs the same problem with CH₄/air at φ = 0.75
 (drm19, Le(CH₄) = 0.97, thermodiffusively neutral) and settles the question by
 construction rather than by argument.
+
+## A diffusive boundary condition (`bc_nscbc_extrap_temperature`)
+
+The measurements above were made before the outflow had any diffusive treatment
+at all. `Source/Diffusion.cpp` forms the conductive and species fluxes at a
+physical boundary face from these ghost cells, and in the entropy closure the
+ghost temperature is whatever the EOS returns from the extrapolated density and
+the acoustically-set pressure — nothing chooses it with a heat flux in mind.
+
+Check C8 in `Verification/NSCBC1D` puts a number on it. On a flame-like ramp
+(2×10⁴ K/cm, 0.01 cm cells) the ghost overstates the face temperature gradient
+by **40%**: T_ghost = 1680 K where the interior ramp continues to 1600 K.
+
+`pelec.bc_nscbc_extrap_temperature = 1` closes the λ₀ family on temperature
+instead — T is extrapolated on the same minmod slope as everything else and ρ
+follows from the EOS — so the face gradient is the interior one, exactly. A
+uniform state still comes back to 2×10⁻¹⁶, so nothing hyperbolic is given up.
+
+Measured here, at t = 2.4×10⁻⁵ s, mean Δp against the shielded reference:
+
+| outflow | entropy closure | temperature closure | change |
+|---|---|---|---|
+| σ = 1, β = 0.5, β_s = 0 | +2074 | +1894 | −9% |
+| σ = 16, β = 0.5, β_s = 0 | +218 | **+67** | **−69%** |
+| hard `p = p_amb` | −527 | — | — |
+
+The two rows say something worth reading carefully. At σ = 1 the ghost-pressure
+bias of the previous section still dominates, so removing the diffusive error
+buys only 9%. At σ = 16 that bias is largely suppressed, the diffusive error is
+most of what remains, and removing it takes the error down by more than a factor
+of three.
+
+**σ = 16 with the temperature closure is the first setting in this case that
+beats a hard pressure outflow on anchoring** — 67 against 527, a factor of eight
+— while remaining a characteristic boundary. The reflection cost of σ = 16 is
+unchanged at ~28%, so the trade-off of the previous section has not gone away;
+what has changed is that the anchoring side of it is now genuinely good rather
+than merely less bad.
+
+The default is off, because it changes every outflow result. Turn it on when a
+thermal or compositional structure is anywhere near the boundary.

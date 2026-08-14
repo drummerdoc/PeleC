@@ -713,7 +713,9 @@ check_reflection(bool sweep)
     std::printf(
       "  %8s  %12s  %16s  %14s\n", "sigma", "R [%]", "p drift [dyn/cm2]",
       "tau_relax [s]");
-    for (Real s : {0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0}) {
+    for (Real s :
+         {0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0, 2.0, 4.0, 8.0,
+          16.0}) {
       Real d = 0.0;
       const Real R = reflection_coefficient(s, 400, 2, false, &d);
       const Real tau = (s > 0.0) ? Case().L / (s * 34783.7) : 0.0;
@@ -889,6 +891,135 @@ check_fallbacks()
   check(finite, "covered boundary cell -> finite fallback", "state finite");
 }
 
+// C8: does the ghost carry a sensible TEMPERATURE gradient?
+//
+//     This is not a hyperbolic question.  PeleC's diffusion operator forms the
+//     conductive and species fluxes at a physical boundary face from these same
+//     ghost cells, so whatever normal temperature gradient the ghost happens to
+//     carry IS the heat flux leaving the domain.  Nothing in the characteristic
+//     algebra is chosen with that in mind: at an outflow the ghost density
+//     comes from the extrapolated entropy invariant and the ghost pressure from
+//     the acoustic pair, and T is then whatever the EOS returns.
+//
+//     The test puts a flame-like temperature ramp on the boundary stencil at
+//     uniform pressure -- 300 K rising at 2e4 K/cm, which is what a hydrocarbon
+//     flame does -- and asks how far the ghost temperature is from the linear
+//     continuation of the interior profile, as a fraction of one cell's dT.
+//     A boundary with a controlled diffusive flux should sit near zero.
+void
+check_diffusive_gradient()
+{
+  const Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+
+  const Real dx = 1.0e-2;  // 0.01 cm, ~10 cells through a flame
+  const Real dTdx = 2.0e4; // K/cm
+  const Real p0 = cs.p0;
+  const Real u0 = 3.0e3; // outflow, subsonic
+
+  // Interior stencil N, N-1, N-2 at uniform pressure with a linear T ramp,
+  // T increasing toward the boundary as it does on the burnt side of a flame.
+  Real sN[NVAR], sM1[NVAR], sM2[NVAR], sg[NVAR];
+  const Real T_N = 1400.0;
+  const Real T_M1 = T_N - dTdx * dx;
+  const Real T_M2 = T_N - 2.0 * dTdx * dx;
+  auto rho_of = [&](const Real T) {
+    Real r = 0.0, e = 0.0;
+    eos.PYT2RE(p0, Y, T, r, e);
+    return r;
+  };
+  set_state(sN, rho_of(T_N), u0, T_N, Y);
+  set_state(sM1, rho_of(T_M1), u0, T_M1, Y);
+  set_state(sM2, rho_of(T_M2), u0, T_M2, Y);
+
+  pc_nscbc::Params prm;
+  prm.sigma = 0.25;
+  prm.L_ref = 10.0;
+  prm.order = 2;
+  pc_nscbc::Target tgt;
+  tgt.type = pc_nscbc::Type::outflow;
+  tgt.p = p0;
+
+  char buf[256];
+  // Layer 1 is the one that sets the face flux.
+  pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, 1, tgt, prm, sg);
+  const Real T_g = get_prim(sg).T;
+  const Real T_lin = T_N + dTdx * dx; // linear continuation
+  const Real dT_cell = dTdx * dx;     // one cell's worth
+  const Real err = (T_g - T_lin) / dT_cell;
+
+  std::snprintf(
+    buf, sizeof(buf),
+    "ghost T = %.2f K, linear continuation %.2f K, error %.3f of a cell dT",
+    T_g, T_lin, err);
+  // A tolerance of one full cell dT is deliberately loose: this check exists to
+  // MEASURE the discrepancy and put a number in the log, not to gate on a
+  // tight bound the current formulation was never designed to meet.
+  check(
+    std::abs(err) < 1.0, "ghost T within one cell dT of the interior ramp",
+    buf);
+
+  // The implied conductive flux error, in the only units that matter.  Reported
+  // rather than gated: lambda is problem-dependent, so the fraction is the
+  // transferable number.
+  std::snprintf(
+    buf, sizeof(buf), "implied face dT/dx is %.1f%% of the interior value",
+    100.0 * (T_g - get_prim(sN).T) / dT_cell);
+  check(true, "  (reported) face temperature gradient", buf);
+
+  // Species: Y is minmod-extrapolated, so it should be a clean continuation.
+  // Uniform composition here, so the ghost must reproduce it exactly.
+  const Prim qg = get_prim(sg);
+  Real dYmax = 0.0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    dYmax = std::max(dYmax, std::abs(qg.Y[k] - Y[k]));
+  }
+  std::snprintf(buf, sizeof(buf), "max |dY| = %.3e", dYmax);
+  check(dYmax < 1.0e-12, "uniform composition passes through unchanged", buf);
+
+  // Now the temperature closure, which exists precisely to fix the above.
+  prm.extrap_temperature = true;
+  pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, 1, tgt, prm, sg);
+  const Real T_gT = get_prim(sg).T;
+  const Real errT = (T_gT - T_lin) / dT_cell;
+  std::snprintf(
+    buf, sizeof(buf), "ghost T = %.2f K vs %.2f K linear, error %.2e of a cell",
+    T_gT, T_lin, errT);
+  check(
+    std::abs(errT) < 1.0e-9, "extrap_temperature reproduces the ramp exactly",
+    buf);
+
+  std::snprintf(
+    buf, sizeof(buf),
+    "face dT/dx: entropy closure %.1f%%, temperature closure "
+    "%.1f%% of the interior value",
+    100.0 * (T_g - get_prim(sN).T) / dT_cell,
+    100.0 * (T_gT - get_prim(sN).T) / dT_cell);
+  check(true, "  (reported) the two closures side by side", buf);
+
+  // The point of the closure is the DIFFUSIVE flux, so it must not have cost
+  // anything on the hyperbolic side: a uniform state must still come back
+  // exactly, at every layer.
+  Real su[NVAR], sgu[NVAR];
+  set_state(su, rho_of(cs.T0), u0, cs.T0, Y);
+  Real worst = 0.0;
+  for (int layer = 1; layer <= 4; layer++) {
+    pc_nscbc::apply(su, su, su, 3, dx, 0, -1, layer, tgt, prm, sgu);
+    for (int v = 0; v < NVAR; v++) {
+      const Real ref = std::abs(su[v]) > 1.0e-30 ? std::abs(su[v]) : 1.0;
+      worst = std::max(worst, std::abs(sgu[v] - su[v]) / ref);
+    }
+  }
+  std::snprintf(buf, sizeof(buf), "max rel ghost error = %.3e", worst);
+  check(
+    worst < 1.0e-12, "extrap_temperature still reproduces a uniform state",
+    buf);
+}
+
 // C7: the reaction source term.  Chemistry changes the pressure only through
 //     the composition, so the closed-form expression in reaction_dpdt() is
 //     checked against a DIRECTIONAL finite difference along the reaction path
@@ -1015,6 +1146,8 @@ main(int argc, char* argv[])
     check_fallbacks();
     std::printf("\nC7  reaction source term\n");
     check_reaction_source();
+    std::printf("\nC8  diffusive behaviour of the ghost\n");
+    check_diffusive_gradient();
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }

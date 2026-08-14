@@ -26,6 +26,7 @@ amrex::Real PeleC::bc_nscbc_beta = 1.0;
 amrex::Real PeleC::bc_nscbc_beta_s = 1.0;
 int PeleC::bc_nscbc_order = 2;
 bool PeleC::bc_nscbc_pin_farfield = false;
+bool PeleC::bc_nscbc_extrap_temperature = false;
 bool PeleC::add_ext_src = false;
 amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::external_forcing = {0.0};
 bool PeleC::add_forcing_src = false;

@@ -26,6 +26,7 @@ static amrex::Real bc_nscbc_beta;
 static amrex::Real bc_nscbc_beta_s;
 static int bc_nscbc_order;
 static bool bc_nscbc_pin_farfield;
+static bool bc_nscbc_extrap_temperature;
 static bool add_ext_src;
 static amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> external_forcing;
 static bool add_forcing_src;
