@@ -117,7 +117,7 @@ fill_bcs(
   const pc_nscbc::Target& hi_tgt,
   const pc_nscbc::Params& prm,
   Real dx,
-  int* diag = nullptr)
+  amrex::Long* diag = nullptr)
 {
   const int n = f.n;
   for (int layer = 1; layer <= NG; layer++) {
@@ -888,7 +888,7 @@ check_fallbacks()
   Real rho = 0.0, e = 0.0;
   eos.PYT2RE(cs.p0, Y, cs.T0, rho, e);
 
-  int diag[pc_nscbc::Diag::count] = {0};
+  amrex::Long diag[pc_nscbc::Diag::count] = {0};
   Real sN[NVAR], sg[NVAR];
 
   // supersonic outflow
@@ -919,7 +919,7 @@ check_fallbacks()
     body[v] = -1.0;
   }
   set_state(sN, rho, 3.0e3, cs.T0, Y);
-  const int before = diag[pc_nscbc::Diag::body_state];
+  const amrex::Long before = diag[pc_nscbc::Diag::body_state];
   pc_nscbc::apply(sN, body, body, 3, dx, 0, -1, 1, out, prm, sg, diag);
   finite = true;
   for (int v = 0; v < NVAR; v++) {

@@ -16,13 +16,14 @@ namespace {
 // program exit, which is AFTER amrex::Finalize() has torn down the arena it
 // allocated from -- harmless on a CPU build and a use-after-free of the device
 // allocator on a GPU one.
-amrex::Gpu::DeviceVector<int>* nscbc_diag_p = nullptr;
+amrex::Gpu::DeviceVector<amrex::Long>* nscbc_diag_p = nullptr;
 
-amrex::Gpu::DeviceVector<int>&
+amrex::Gpu::DeviceVector<amrex::Long>&
 nscbc_diag()
 {
   if (nscbc_diag_p == nullptr) {
-    nscbc_diag_p = new amrex::Gpu::DeviceVector<int>(pc_nscbc::Diag::count, 0);
+    nscbc_diag_p =
+      new amrex::Gpu::DeviceVector<amrex::Long>(pc_nscbc::Diag::count, 0);
     amrex::ExecOnFinalize([]() {
       delete nscbc_diag_p;
       nscbc_diag_p = nullptr;
@@ -38,7 +39,7 @@ struct PCHypFillExtDir
   bool m_do_turb_inflow{false};
   bool m_nscbc{false};
   amrex::GpuArray<pc_nscbc::Params, AMREX_SPACEDIM> m_nscbc_prm;
-  int* m_nscbc_diag{nullptr};
+  amrex::Long* m_nscbc_diag{nullptr};
 
   AMREX_GPU_HOST
   explicit PCHypFillExtDir(
@@ -46,7 +47,7 @@ struct PCHypFillExtDir
     const bool do_turb_inflow,
     const bool nscbc,
     const amrex::GpuArray<pc_nscbc::Params, AMREX_SPACEDIM>& nscbc_prm,
-    int* nscbc_diag)
+    amrex::Long* nscbc_diag)
     : lprobparm(d_prob_parm),
       m_do_turb_inflow(do_turb_inflow),
       m_nscbc(nscbc),
@@ -400,7 +401,7 @@ pc_bcfill_hyp(
   for (int d = 0; d < AMREX_SPACEDIM; ++d) {
     nscbc_prm[d] = PeleC::nscbc_params(d);
   }
-  int* diag = nscbc ? nscbc_diag().data() : nullptr;
+  amrex::Long* diag = nscbc ? nscbc_diag().data() : nullptr;
 
   amrex::GpuBndryFuncFab<PCHypFillExtDir> hyp_bndry_func(
     PCHypFillExtDir{
@@ -469,11 +470,11 @@ PeleC::nscbc_report_diagnostics()
   if (!bc_nscbc) {
     return;
   }
-  std::vector<int> h(pc_nscbc::Diag::count, 0);
+  std::vector<amrex::Long> h(pc_nscbc::Diag::count, 0);
   amrex::Gpu::copy(
     amrex::Gpu::deviceToHost, nscbc_diag().begin(), nscbc_diag().end(),
     h.begin());
-  amrex::ParallelDescriptor::ReduceIntSum(h.data(), pc_nscbc::Diag::count);
+  amrex::ParallelDescriptor::ReduceLongSum(h.data(), pc_nscbc::Diag::count);
 
   // The supersonic path is exact, not a degradation, so it is reported but is
   // not a warning.  The others mean the boundary is being asked for something
@@ -482,8 +483,8 @@ PeleC::nscbc_report_diagnostics()
   // beta or beta_s that is silently not being applied looks exactly like a
   // beta or beta_s that does nothing, and the only way to tell the two apart
   // is to count it.
-  const long total =
-    static_cast<long>(h[pc_nscbc::Diag::reversed]) +
+  const amrex::Long total =
+    h[pc_nscbc::Diag::reversed] +
     h[pc_nscbc::Diag::body_state] + h[pc_nscbc::Diag::eos_failure] +
     h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop] +
     h[pc_nscbc::Diag::source_drop];

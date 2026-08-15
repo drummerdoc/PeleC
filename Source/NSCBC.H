@@ -450,7 +450,13 @@ struct Transverse
 // ---------------------------------------------------------------------------
 //  Diagnostic counters.  Every fallback in this kernel is counted; a silent
 //  fallback is a bug that will not be found.  Indices into a small device
-//  array reduced at the end of the run.
+//  array reduced at the end of the run.  The storage is amrex::Long, not int:
+//  the counters are only reset when they are REPORTED, and with the default
+//  sum_interval = -1 they never are -- the supersonic counter on a large 3-D
+//  run increments once per supersonic ghost cell per fill and walks past 2^31
+//  in a few times 10^4 steps, and an overflowing signed atomic is exactly the
+//  kind of quiet corruption these counters exist to prevent.  amrex::Gpu::
+//  Atomic::Add has a native Long specialisation on every backend.
 // ---------------------------------------------------------------------------
 namespace Diag {
 enum : int {
@@ -736,7 +742,8 @@ pack_ghost(
 //                     convention, matching bcnormal).
 //  layer              1 for the ghost cell nearest the domain, 2 for the next,
 //                     and so on.
-//  diag               optional counter array of length Diag::count; may be
+//  diag               optional amrex::Long counter array of length
+//                     Diag::count; may be
 //                     null.
 // ===========================================================================
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE void
@@ -752,14 +759,14 @@ apply(
   Target const& tgt,
   Params const& prm,
   amrex::Real s_ghost[NVAR],
-  int* diag = nullptr,
+  amrex::Long* diag = nullptr,
   Transverse const* tr = nullptr) noexcept
 {
   auto eos = pele::physics::PhysicsType::eos();
 
   auto bump = [=](const int which) {
     if (diag != nullptr) {
-      amrex::HostDevice::Atomic::Add(&diag[which], 1);
+      amrex::HostDevice::Atomic::Add(&diag[which], amrex::Long(1));
     }
   };
 
