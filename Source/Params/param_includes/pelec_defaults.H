@@ -27,6 +27,7 @@ amrex::Real PeleC::bc_nscbc_beta_s = 1.0;
 int PeleC::bc_nscbc_order = 2;
 bool PeleC::bc_nscbc_pin_farfield = false;
 bool PeleC::bc_nscbc_extrap_temperature = false;
+bool PeleC::bc_nscbc_extrap_material = false;
 bool PeleC::add_ext_src = false;
 amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::external_forcing = {0.0};
 bool PeleC::add_forcing_src = false;
@@ -63,10 +64,8 @@ bool PeleC::diffuse_spec = false;
 bool PeleC::diffuse_vel = false;
 bool PeleC::transport_harmonic_mean = true;
 bool PeleC::do_isothermal_walls = false;
-amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::domlo_isothermal_temp = {
-  -1.0};
-amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::domhi_isothermal_temp = {
-  -1.0};
+amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::domlo_isothermal_temp = {-1.0};
+amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> PeleC::domhi_isothermal_temp = {-1.0};
 bool PeleC::do_les = false;
 bool PeleC::use_explicit_filter = false;
 amrex::Real PeleC::Cs = 0.0;

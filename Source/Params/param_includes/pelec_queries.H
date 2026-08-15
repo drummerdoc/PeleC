@@ -27,6 +27,7 @@ pp.query("bc_nscbc_beta_s", bc_nscbc_beta_s);
 pp.query("bc_nscbc_order", bc_nscbc_order);
 pp.query("bc_nscbc_pin_farfield", bc_nscbc_pin_farfield);
 pp.query("bc_nscbc_extrap_temperature", bc_nscbc_extrap_temperature);
+pp.query("bc_nscbc_extrap_material", bc_nscbc_extrap_material);
 pp.query("add_ext_src", add_ext_src);
 {
   amrex::Vector<amrex::Real> tmp(AMREX_SPACEDIM, 0.0);

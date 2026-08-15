@@ -270,6 +270,62 @@ struct Params
   // near the boundary.
   bool extrap_temperature = false;
 
+  // Continue the MATERIAL part of the incoming invariant R_- into the ghost
+  // at an outflow, so that a dilatational velocity gradient crossing the face
+  // is not converted into ghost pressure.
+  //
+  // The problem this solves.  Linearised about the boundary cell,
+  //
+  //     outgoing acoustic wave:            dR_+ = 2 du,   dR_- = 0
+  //     material structure (dp ~ 0):       dR_+ = dR_- = du
+  //
+  // The default treatment extrapolates R_+ with its full interior slope and
+  // gives R_- only the relaxation increment, so across material structure the
+  // ghost picks up p_g - p_N = 1/2 rho c l du_out per layer -- the bias of
+  // check C9(a) in Verification/NSCBC1D and the dominant error at a
+  // front-crossing outflow (Exec/RegTests/NSCBC-FlameOutflow).  Continuing
+  // the material slope of R_- as well makes the ghost carry the interior's
+  // u and p slopes exactly and the bias vanishes, at ANY sigma.
+  //
+  // Why the slope cannot simply be measured from R_-.  The interior gradient
+  // of R_- also contains every piece of INCOMING acoustics near the boundary
+  // -- including the anchoring wave the relaxation itself launches -- and
+  // extrapolating that back into the ghost is a positive feedback loop: it
+  // multiplies the effective relaxation rate (measured 16x in the C5 rate
+  // check) and reflects an outgoing pulse at 13% instead of 0.8%.  The
+  // 1-D acoustic pair alone cannot distinguish material structure from
+  // counter-running waves; what does distinguish them is the entropy family,
+  // which is OUTGOING at an outflow and carries no acoustic content:
+  //
+  //     dS = drho - dp/c^2      -> 0        for any acoustic wave
+  //                             -> drho     for material structure
+  //
+  // Steady continuity through the face (d(rho u) = 0, with the momentum-flux
+  // pressure gradient dp = -rho u du) turns that into a bound on the material
+  // velocity slope,
+  //
+  //     du_mat = -u_out dS / (rho (1 - M^2)) ,   dR_-^mat = du_mat (1 + M) ,
+  //
+  // and the applied slope is minmod(measured dR_-, dR_-^mat): across a flame
+  // the two agree and the measured slope is used exactly; for pure acoustics
+  // the entropy bound is ~0 and the continuation shuts itself off, so the
+  // feedback path is closed -- every quantity the incoming model consumes
+  // rides an outgoing family.  A structure that advects without dilatation
+  // (a contact: du = 0, drho != 0) has measured dR_- = 0 and is equally
+  // unaffected.
+  //
+  // The bound assumes the structure is quasi-steady in the LAB frame; a front
+  // advancing against the flow at speed V has its true slope underestimated
+  // by u/(u - V), so the continuation is partial there -- conservative, never
+  // amplifying.  Keep sigma > 0 with this on: the relaxation increment is
+  // still the only anchoring.
+  //
+  // Default false: it changes outflow results near structures, so it is
+  // opt-in, like extrap_temperature.  Turn it on when material structure (a
+  // flame, a density front, a wake) crosses the outflow.  pin_farfield
+  // ignores it: a value pin has no slot for a slope.
+  bool extrap_material = false;
+
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
   // face by the caller.  Only the ratio sigma/L_ref is physical, so this is
   // not a user knob; it exists so that sigma keeps its literature meaning.
@@ -881,6 +937,32 @@ apply(
     }
   }
 
+  // Material-slope continuation of R_- (see Params::extrap_material).  The
+  // measured slope of R_- is used only within the bound supplied by the
+  // entropy family: dS carries no acoustic content and is an OUTGOING family
+  // at an outflow, so the incoming model never feeds on the waves it
+  // launches.  Both slopes are measured on the same stencil, in the same
+  // frozen-impedance variables, and with the same limiter as R_+.
+  amrex::Real dRm = 0.0;
+  if (outflow_face && prm.extrap_material && linear && qNm1.ok && qNm2.ok) {
+    const amrex::Real Rm_Nm1 = n_sgn * qNm1.u[idir] - qNm1.p / rho_c;
+    const amrex::Real Rm_Nm2 = n_sgn * qNm2.u[idir] - qNm2.p / rho_c;
+    const amrex::Real dRm_meas = minmod(Rm_N - Rm_Nm1, Rm_Nm1 - Rm_Nm2);
+    // Entropy-family bound on the material velocity slope, from steady
+    // continuity through the face with the momentum-flux pressure gradient.
+    const amrex::Real inv_c2 = 1.0 / (c_N * c_N);
+    const amrex::Real S_N = qN.rho - qN.p * inv_c2;
+    const amrex::Real S_Nm1 = qNm1.rho - qNm1.p * inv_c2;
+    const amrex::Real S_Nm2 = qNm2.rho - qNm2.p * inv_c2;
+    const amrex::Real dS = minmod(S_N - S_Nm1, S_Nm1 - S_Nm2);
+    const amrex::Real du_mat = -u_out_N * dS / (qN.rho * one_m_M2);
+    dRm = minmod(dRm_meas, du_mat * (1.0 + mach));
+    if (!amrex::Math::isfinite(dRm)) {
+      dRm = 0.0;
+      bump(Diag::floored);
+    }
+  }
+
   amrex::Real Rm_g;
   if (outflow_face && prm.pin_farfield) {
     // Hard far-field pin: R_- takes its far-field value (u_out = 0,
@@ -907,8 +989,9 @@ apply(
         bump(Diag::source_drop);
       }
     }
-    Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dx_normal * L_in /
-                    (lambda_in * rho_c);
+    Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dRm +
+           static_cast<amrex::Real>(layer) * dx_normal * L_in /
+             (lambda_in * rho_c);
   }
 
   // ---- 6. Invert the acoustic pair --------------------------------------

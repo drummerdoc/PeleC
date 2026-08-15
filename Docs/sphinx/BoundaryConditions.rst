@@ -229,6 +229,7 @@ needs to be changed.
    ``pelec.bc_nscbc_order``            2          Extrapolation order, 1 or 2. Verification knob only.
    ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
    ``pelec.bc_nscbc_extrap_temperature`` 0        Give the outflow face a controlled conductive flux.
+   ``pelec.bc_nscbc_extrap_material``  0          Continue material structure through the outflow.
    ==================================  =========  ==========================================================
 
 **All of these are positive.** The legacy Fortran implementation required ``relax_T`` to be negative and its
@@ -277,6 +278,25 @@ It is off by default because it changes every outflow result. Turn it on when a 
 near the boundary. In ``Exec/RegTests/NSCBC-FlameOutflow`` it is worth 9% at :math:`\sigma = 1`, where the ghost-pressure
 bias still dominates, and 69% at :math:`\sigma = 16`, where that bias is suppressed and the diffusive error is most of
 what remains — taking the mean-pressure error to 67 dyn/cm², eight times *better* than a hard pressure outflow.
+
+``bc_nscbc_extrap_material`` attacks the ghost-pressure bias itself rather than out-relaxing it. The default outflow
+extrapolates the outgoing invariant :math:`R_+` with its full interior slope while the incoming :math:`R_-` carries only
+the relaxation increment, so across a dilatational velocity gradient the ghost picks up the
+:math:`\tfrac{1}{2}\rho c\,\ell\, \delta u` bias of check C9(a) — the dominant error at a front-crossing outflow. The
+material part of the :math:`R_-` slope cannot be measured from :math:`R_-` directly (its gradient also contains every
+incoming wave, including the one the relaxation itself launches — extrapolating that is positive feedback), so it is
+bounded through the *entropy* family, which is outgoing at an outflow and carries no acoustic content: steady continuity
+turns :math:`dS = d\rho - dp/c^2` into :math:`du_{\rm mat} = -u\, dS / (\rho\,(1 - M^2))`, and the applied slope is
+``minmod`` of the measured :math:`R_-` slope and that bound. Across a flame the two agree and the ghost continues the
+interior's :math:`u` and :math:`p` slopes exactly, killing the bias at *any* :math:`\sigma`; for pure acoustics the
+entropy bound vanishes and nothing changes (reflection, anchoring and the relaxation rate are unmoved in
+``Verification/NSCBC1D``). Check C11 gates it on a manufactured flame — a sustained velocity/density ramp with an exact
+steady solution straddling the outflow: the entropy closure drifts by :math:`15707\ {\rm dyn/cm^2}` while the boundary
+equilibrates and distorts :math:`\partial u/\partial n` at the face to 175% of its exact value; with this flag the drift
+is :math:`3175` and the face gradient stays within the band a ghost fill of the *exact* continuation also occupies. Its
+known cost, measured by C10: it continues whatever material structure it sees, so a *transient* structure that ought to
+decay away right at the boundary is held there longer. Keep :math:`\sigma > 0` with this on — the relaxation increment
+is still the only anchoring.
 That is simultaneously non-reflecting and anchored, which a rate-based relaxation cannot be, but it anchors to
 :math:`p_{\rm target} + \rho c u_n` rather than to :math:`p_{\rm target}`, and because it constrains a *value*
 rather than a rate its effective relaxation rate is :math:`c/\Delta x` and it does not converge under mesh

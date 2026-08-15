@@ -458,6 +458,7 @@ PeleC::nscbc_params(const int idir)
   // anchored at the origin.
   const auto& geom = amrex::DefaultGeometry();
   p.extrap_temperature = bc_nscbc_extrap_temperature;
+  p.extrap_material = bc_nscbc_extrap_material;
   p.L_ref = geom.ProbHi(idir) - geom.ProbLo(idir);
   return p;
 }

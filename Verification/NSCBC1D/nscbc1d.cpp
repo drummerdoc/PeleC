@@ -395,25 +395,30 @@ check_uniform()
     in.Y[k] = Y[k];
   }
 
-  for (Real sig : {0.0, 0.25, 1.0}) {
-    prm.sigma = sig;
-    prm.relax_u = sig;
-    prm.relax_t = sig;
-    Field g = f;
-    fill_bcs(g, in, out, prm, dx);
-    Real worst = 0.0;
-    for (int layer = 1; layer <= NG; layer++) {
-      for (int v = 0; v < NVAR; v++) {
-        const Real ref = std::max(std::abs(f.at(0)[v]), 1.0);
-        worst = std::max(worst, std::abs(g.at(-layer)[v] - f.at(0)[v]) / ref);
-        worst = std::max(
-          worst, std::abs(g.at(cs.n - 1 + layer)[v] - f.at(cs.n - 1)[v]) / ref);
+  for (bool mat : {false, true}) {
+    prm.extrap_material = mat;
+    for (Real sig : {0.0, 0.25, 1.0}) {
+      prm.sigma = sig;
+      prm.relax_u = sig;
+      prm.relax_t = sig;
+      Field g = f;
+      fill_bcs(g, in, out, prm, dx);
+      Real worst = 0.0;
+      for (int layer = 1; layer <= NG; layer++) {
+        for (int v = 0; v < NVAR; v++) {
+          const Real ref = std::max(std::abs(f.at(0)[v]), 1.0);
+          worst = std::max(worst, std::abs(g.at(-layer)[v] - f.at(0)[v]) / ref);
+          worst = std::max(
+            worst,
+            std::abs(g.at(cs.n - 1 + layer)[v] - f.at(cs.n - 1)[v]) / ref);
+        }
       }
+      char buf[160];
+      std::snprintf(
+        buf, sizeof(buf), "sigma=%.2f mat=%d  max rel ghost error = %.3e", sig,
+        static_cast<int>(mat), worst);
+      check(worst < 1e-12, "uniform state is reproduced exactly", buf);
     }
-    char buf[160];
-    std::snprintf(
-      buf, sizeof(buf), "sigma=%.2f  max rel ghost error = %.3e", sig, worst);
-    check(worst < 1e-12, "uniform state is reproduced exactly", buf);
   }
 }
 
@@ -516,7 +521,12 @@ check_species()
   // A linear composition ramp running out through a hi outflow face.
   Real sN[NVAR], sNm1[NVAR], sNm2[NVAR], sg[NVAR];
   auto mk = [&](Real* s, Real yO2) {
-    Real Y[NUM_SPECIES];
+    // Zero-initialised: with a mechanism larger than air's two species, the
+    // remaining entries would otherwise be stack garbage -- which is exactly
+    // the "nothing here may assume a particular mechanism" trap the README
+    // documents, and it made this check fail under LiDryer while passing
+    // under air.
+    Real Y[NUM_SPECIES] = {0.0};
     Y[O2_ID] = yO2;
     Y[N2_ID] = 1.0 - yO2;
     Real rho = 0.0, e = 0.0;
@@ -587,7 +597,8 @@ check_species()
 //     measure the amplitude that comes back.  Reports the sigma sweep, which
 //     is the curve the AMReX regression test is checked against.
 Real
-reflection_coefficient(Real sigma, int n, int order, bool pin, Real* p_drift)
+reflection_coefficient(
+  Real sigma, int n, int order, bool pin, Real* p_drift, bool mat = false)
 {
   Case cs;
   cs.n = n;
@@ -633,6 +644,7 @@ reflection_coefficient(Real sigma, int n, int order, bool pin, Real* p_drift)
   prm.sigma = sigma;
   prm.order = order;
   prm.pin_farfield = pin;
+  prm.extrap_material = mat;
   pc_nscbc::Target off, out;
   out.type = pc_nscbc::Type::outflow;
   out.p = cs.p0;
@@ -717,6 +729,22 @@ check_reflection(bool sweep)
     100.0 * R0o2, 100.0 * R2);
   check(R0o2 <= R2 * 1.05, "sigma=0 is the least reflecting", buf);
 
+  // The material-slope continuation must not disturb the ACOUSTIC behaviour:
+  // a right-running pulse has dR_- = 0 to linear order, so both the
+  // reflection and the sigma anchoring must come out essentially unchanged.
+  // This is the acoustic half of the extrap_material contract; C9(a) gates
+  // the material half.
+  Real drift_mat = 0.0;
+  const Real R2m = reflection_coefficient(0.25, 400, 2, false, &drift_mat, true);
+  std::snprintf(
+    buf, sizeof(buf),
+    "R = %.4f %% (entropy %.4f %%), drift %.2f (entropy %.2f)", 100.0 * R2m,
+    100.0 * R2, drift_mat, drift);
+  check(R2m < 0.01, "extrap_material keeps reflection below 1%", buf);
+  check(
+    std::abs(drift_mat) < 2.0 * std::abs(drift) + 0.5,
+    "extrap_material keeps the sigma anchoring", buf);
+
   if (sweep) {
     std::printf("\n  sigma sweep (n=400, order=2)\n");
     std::printf(
@@ -753,7 +781,7 @@ check_relaxation_rate()
   auto eos = pele::physics::PhysicsType::eos();
   const Real sigma = 0.5;
 
-  auto measure = [&](int n) {
+  auto measure = [&](int n, bool mat = false) {
     Case c2;
     c2.n = n;
     Field f(n), g(n), h(n);
@@ -771,6 +799,7 @@ check_relaxation_rate()
     pc_nscbc::Params prm;
     prm.L_ref = c2.L;
     prm.sigma = sigma;
+    prm.extrap_material = mat;
     pc_nscbc::Target out;
     out.type = pc_nscbc::Type::outflow;
     out.p = c2.p0;
@@ -826,6 +855,16 @@ check_relaxation_rate()
   check(
     r800.first / K_expected > 0.2 && r800.first / K_expected < 5.0,
     "relaxation rate is within an order of K=sigma*c/L", buf);
+
+  // The material-slope continuation adds a slope, not a rate: the relaxation
+  // must decay the same offset at the same K.
+  const auto r200m = measure(200, true);
+  std::snprintf(
+    buf, sizeof(buf), "K = %.2f with extrap_material, %.2f without (ratio %.3f)",
+    r200m.first, r200.first, r200m.first / r200.first);
+  check(
+    std::abs(r200m.first / r200.first - 1.0) < 0.1,
+    "extrap_material leaves the relaxation rate unchanged", buf);
 }
 
 // C6: robustness.  Every fallback path must return a finite, physical state
@@ -1124,6 +1163,50 @@ check_ghost_pressure_bias()
     check(
       std::abs(p_g1 - cs.p0) < 1.0e-6 * cs.p0,
       "the bias is carried entirely by the extrapolation", buf);
+
+    // The fix, on the structure it exists for.  The uniform-density ramp
+    // above is a synthetic state -- steady continuity does not admit it -- so
+    // the entropy-family bound in extrap_material correctly sees nothing
+    // there.  Rebuild the ramp as the mass-conserving structure of C10
+    // (rho u uniform, pressure carrying the momentum flux): the measured
+    // slope of R_- and the entropy bound then agree, the ghost continues the
+    // interior's u and p slopes, and the 1/2 rho c du bias is gone while
+    // order = 2 keeps the full structure that order = 1 throws away.
+    {
+      const Real mdot = rho * u_N;
+      auto ramp_state = [&](Real* s, const Real u) {
+        const Real rr = mdot / u;
+        const Real pp = cs.p0 + mdot * (u_N - u); // p_N lands on the target
+        Real TT = 0.0;
+        eos.RYP2T(rr, Y, pp, TT);
+        set_state(s, rr, u, TT, Y);
+      };
+      ramp_state(sN, u_N);
+      ramp_state(sM1, u_N - du);
+      ramp_state(sM2, u_N - 2.0 * du);
+      const Real dp_cell = -mdot * du; // exact per-cell momentum-flux slope
+      const Real bias0 = 0.5 * rho * c0 * du; // what the entropy closure adds
+
+      prm.order = 2;
+      prm.extrap_material = true;
+      for (int layer = 1; layer <= 2; layer++) {
+        pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, layer, out, prm, sg);
+        const Prim qg = get_prim(sg);
+        const Real p_resid = qg.p - (cs.p0 + layer * dp_cell);
+        std::snprintf(
+          buf, sizeof(buf),
+          "layer %d: p_ghost - p_expected = %.2f (entropy closure bias %.1f), "
+          "u_ghost = %.1f (slope continued: %.1f)",
+          layer, p_resid, layer * bias0, qg.u, u_N + layer * du);
+        check(
+          std::abs(p_resid) < 0.05 * layer * bias0,
+          "extrap_material removes the ghost-pressure bias", buf);
+        check(
+          std::abs(qg.u - (u_N + layer * du)) < 0.05 * layer * du,
+          "extrap_material keeps the full du/dn in the ghost", buf);
+      }
+      prm.extrap_material = false;
+    }
   }
 
   // ---- (b) dynamic ------------------------------------------------------
@@ -1377,7 +1460,7 @@ check_extrapolation_drives_solution()
   // mean pressure over the FIRST n cells (the region the short and the long
   // domain share) and du/dn at the outflow face at NS times.
   auto run = [&](const int nc, const Real sigma, const int order,
-                 const Real ratio, Real* pm, Real* gr) {
+                 const Real ratio, const bool mat, Real* pm, Real* gr) {
     Field f(nc), g(nc), h(nc);
     init(f, nc, ratio);
 
@@ -1385,6 +1468,7 @@ check_extrapolation_drives_solution()
     prm.L_ref = nc * dx;
     prm.sigma = sigma;
     prm.order = order;
+    prm.extrap_material = mat;
     pc_nscbc::Target off, out;
     out.type = pc_nscbc::Type::outflow;
     out.p = cs.p0;
@@ -1439,19 +1523,21 @@ check_extrapolation_drives_solution()
   // from the common region: the expanded gas reaches ~1200 K, where c ~ 7e4
   // cm/s, so 20 cm would only just be shielded over t_end and 40 cm is not.
   auto err = [&](const Real sigma, const int order, const Real ratio,
-                 Real* eh, Real* gh, Real* gr) {
+                 const bool mat, Real* eh, Real* gh, Real* gr) {
     Real pr[NS], pt[NS];
-    run(5 * n, sigma, order, ratio, pr, gr);
-    run(n, sigma, order, ratio, pt, gh);
+    run(5 * n, sigma, order, ratio, mat, pr, gr);
+    run(n, sigma, order, ratio, mat, pt, gh);
     for (int k = 0; k < NS; k++) {
       eh[k] = pt[k] - pr[k];
     }
   };
 
   Real eh[NS], gh[NS], gr[NS];
-  auto row = [&](const Real sigma, const int order, const Real ratio) {
-    err(sigma, order, ratio, eh, gh, gr);
-    std::printf("    %6.2f %6d %6.1f  ", sigma, order, ratio);
+  auto row = [&](const Real sigma, const int order, const Real ratio,
+                 const bool mat = false) {
+    err(sigma, order, ratio, mat, eh, gh, gr);
+    std::printf("    %6.2f %6d %6.1f%s", sigma, order, ratio,
+                mat ? " m" : "  ");
     for (int k = 1; k < NS; k++) {
       std::printf(" %9.1f", eh[k]);
     }
@@ -1495,6 +1581,368 @@ check_extrapolation_drives_solution()
   check(
     std::abs(e_o1 - e_r4) > 0.25 * std::abs(e_r4),
     "the outgoing extrapolation drives the solution", buf);
+
+  // --- extrap_material on the same configuration -------------------------
+  // Reported, not gated, and the sign of the result matters more than its
+  // size: the continuation HOLDS the ramp at the boundary (du/dn stays high
+  // where the reference decays to zero), so the short domain keeps venting a
+  // structure whose exact solution is busy dying.  That is not the fix
+  // misbehaving -- it is C10's own negative result seen from the other side:
+  // a source-free ramp is not sustainable, so a boundary condition that
+  // faithfully continues the structure it sees disagrees with a reference in
+  // which that structure decays.  The gate for the fix is C11, where the
+  // ramp is SUSTAINED and the exact answer is to hold it.  What this row
+  // establishes is the honest cost: do not leave extrap_material on at a
+  // boundary whose structure is transient and should be allowed to die out.
+  const Real e_mat = row(1.0, 2, 4.0, true);
+  std::snprintf(
+    buf, sizeof(buf),
+    "error at t_end: %.1f without, %.1f with -- the continuation holds a "
+    "DECAYING ramp alive at the face",
+    e_r4, e_mat);
+  report("extrap_material on a decaying (unsustainable) ramp", buf);
+}
+
+// C11: the sustained ramp -- a front crossing the outflow, with an exact
+//      steady solution.  This is the test C9(b) and C10 both said was
+//      missing: C9(b)'s heat band could not hold a velocity gradient at the
+//      boundary without dumping unmodelled energy into the boundary cells,
+//      and C10's source-free ramp could not hold it at all.  The resolution
+//      is manufactured: take the mass- and momentum-consistent ramp of C10
+//      (rho u uniform, p carrying the momentum flux) and add the energy
+//      source S_E(x) = mdot dH/dx that makes it an EXACT steady solution of
+//      the sourced Euler equations -- which is precisely a flame's mechanical
+//      structure sustained by its heat release, minus the chemistry.
+//
+//      The exact solution is the initial condition, indefinitely.  A perfect
+//      boundary holds it; every departure is boundary error.  The entropy
+//      closure converts the ramp's du/dn into ghost pressure (C9(a)) and the
+//      domain drifts to the equilibrium offset that NSCBC-FlameOutflow
+//      measures; extrap_material continues the structure and must hold both
+//      the mean pressure AND the du/dn at the face.
+void
+check_sustained_ramp()
+{
+  const Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  char buf[256];
+
+  const int n = 200;
+  const Real dx = cs.L / n;
+  const Real u0 = 3.0e2;
+  const Real ratio = 4.0;
+  const Real wr = 1.0;
+  const Real t_end = 6.0e-4; // ~2 relaxation times at sigma = 1
+  const int NS = 4;
+
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+  const Real mdot = rho0 * u0;
+
+  auto uofx = [&](const Real x) {
+    const Real g = 0.5 * (1.0 + std::tanh((x - cs.L) / wr));
+    return u0 * (1.0 + (ratio - 1.0) * g);
+  };
+  // Total enthalpy of the exact profile at x.
+  auto Hofx = [&](const Real x) {
+    const Real u = uofx(x);
+    const Real rho = mdot / u;
+    const Real p = cs.p0 + mdot * (u0 - u);
+    Real T = 0.0, e = 0.0;
+    eos.RYP2T(rho, Y, p, T);
+    eos.RTY2E(rho, T, Y, e);
+    return e + p / rho + 0.5 * u * u;
+  };
+
+  auto init = [&](Field& f, const int nc) {
+    for (int i = -NG; i < nc + NG; i++) {
+      const Real x = (i + 0.5) * dx;
+      const Real u = uofx(x);
+      const Real rho = mdot / u;
+      const Real p = cs.p0 + mdot * (u0 - u);
+      Real T = 0.0;
+      eos.RYP2T(rho, Y, p, T);
+      set_state(f.at(i), rho, u, T, Y);
+    }
+  };
+
+  // The manufactured energy source, cell-centred, frozen in time.
+  auto make_source = [&](const int nc) {
+    std::vector<Real> q(nc, 0.0);
+    for (int i = 0; i < nc; i++) {
+      const Real x = (i + 0.5) * dx;
+      q[i] = mdot * (Hofx(x + 0.5 * dx) - Hofx(x - 0.5 * dx)) / dx;
+    }
+    return q;
+  };
+
+  auto add_source = [&](Field& f, const std::vector<Real>& q, const Real dt) {
+    for (int i = 0; i < f.n; i++) {
+      Real* s = f.at(i);
+      s[UEDEN] += dt * q[i];
+      s[UEINT] += dt * q[i];
+      const Real rho = s[URHO];
+      Real Yl[NUM_SPECIES], ys = 0.0;
+      for (int k = 0; k < NUM_SPECIES; k++) {
+        Yl[k] = std::max(s[UFS + k] / rho, 0.0);
+        ys += Yl[k];
+      }
+      for (int k = 0; k < NUM_SPECIES; k++) {
+        Yl[k] /= ys;
+      }
+      const Real e = s[UEINT] / rho;
+      Real T = s[UTEMP] > 0.0 ? s[UTEMP] : 300.0;
+      eos.REY2T(rho, e, Yl, T);
+      s[UTEMP] = T;
+    }
+  };
+
+  // Advance nc cells to t_end; sample mean p over the first n cells and
+  // du/dn at x = cs.L (the short domain's outflow face) at NS times.
+  // mode: 0 = entropy closure, 1 = extrap_material, 2 = ORACLE -- the hi
+  // ghosts are overwritten with the exact profile every fill, i.e. the best
+  // any ghost-cell closure can possibly do.  The oracle is the yardstick the
+  // closures are gated against: the truncated discrete problem has its own
+  // attractor (see below), and no ghost fill can beat the oracle's.
+  auto run = [&](const int nc, const Real sigma, const int mode, Real* pm,
+                 Real* gr) {
+    Field f(nc), g(nc), h(nc);
+    init(f, nc);
+    const auto q = make_source(nc);
+
+    auto oracle_ghosts = [&](Field& w) {
+      auto eos2 = pele::physics::PhysicsType::eos();
+      for (int layer = 1; layer <= NG; layer++) {
+        const int i = w.n - 1 + layer;
+        const Real x = (i + 0.5) * dx;
+        const Real u = uofx(x);
+        const Real rho = mdot / u;
+        const Real p = cs.p0 + mdot * (u0 - u);
+        Real T = 0.0;
+        eos2.RYP2T(rho, Y, p, T);
+        set_state(w.at(i), rho, u, T, Y);
+      }
+    };
+
+    pc_nscbc::Params prm;
+    prm.L_ref = nc * dx;
+    prm.sigma = sigma;
+    prm.extrap_material = (mode == 1);
+    pc_nscbc::Target off, out;
+    out.type = pc_nscbc::Type::outflow;
+    out.p = cs.p0 + mdot * (u0 - uofx(cs.L)); // the exact face pressure
+
+    auto sample = [&](const int k) {
+      Real psum = 0.0;
+      for (int i = 0; i < n; i++) {
+        psum += get_prim(f.at(i)).p;
+      }
+      pm[k] = psum / n;
+      gr[k] = (get_prim(f.at(n - 1)).u - get_prim(f.at(n - 2)).u) / dx;
+    };
+
+    Real t = 0.0;
+    int k = 0;
+    sample(k++);
+    while (k < NS) {
+      const Real t_next = t_end * static_cast<Real>(k) / (NS - 1);
+      while (t < t_next) {
+        Real cmax = 0.0;
+        for (int i = 0; i < nc; i++) {
+          const Prim qq = get_prim(f.at(i));
+          cmax = std::max(cmax, std::abs(qq.u) + sound_speed(qq));
+        }
+        Real dt = std::min(cs.cfl * dx / cmax, t_next - t);
+        if (dt <= 0.0) {
+          break;
+        }
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(f.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(f, off, out, prm, dx);
+        if (mode == 2) {
+          oracle_ghosts(f);
+        }
+        stage(f, g, dx, dt);
+        add_source(g, q, dt);
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(g.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(g, off, out, prm, dx);
+        if (mode == 2) {
+          oracle_ghosts(g);
+        }
+        stage(g, h, dx, dt);
+        add_source(h, q, dt);
+        for (int i = 0; i < nc; i++) {
+          for (int v = 0; v < NVAR; v++) {
+            f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+          }
+        }
+        t += dt;
+      }
+      sample(k++);
+    }
+  };
+
+  const Real g0 =
+    (uofx(cs.L - 0.5 * dx) - uofx(cs.L - 1.5 * dx)) / dx; // initial du/dn
+
+  // ---- The face flux, statically -----------------------------------------
+  // Before any dynamics: fill the ghosts from the exact interior state with
+  // each closure, reconstruct the boundary face exactly as stage() does, and
+  // compare the HLLC flux against the exact steady flux the face must carry
+  // (mdot, mdot u + p, mdot H).  This is the flux-level form of C9(a), and it
+  // has no translational mode to hide behind (see below).
+  {
+    auto face_flux = [&](const bool mat, Real* flx) {
+      Field f(n);
+      init(f, n);
+      pc_nscbc::Params prm;
+      prm.L_ref = cs.L;
+      prm.sigma = 1.0;
+      prm.extrap_material = mat;
+      pc_nscbc::Target off, out;
+      out.type = pc_nscbc::Type::outflow;
+      out.p = cs.p0 + mdot * (u0 - uofx(cs.L));
+      fill_bcs(f, off, out, prm, dx);
+      Real sl[NVAR], sr[NVAR];
+      for (int v = 0; v < NVAR; v++) {
+        const Real dL = mm(
+          f.at(n - 1)[v] - f.at(n - 2)[v], f.at(n)[v] - f.at(n - 1)[v]);
+        const Real dR =
+          mm(f.at(n)[v] - f.at(n - 1)[v], f.at(n + 1)[v] - f.at(n)[v]);
+        sl[v] = f.at(n - 1)[v] + 0.5 * dL;
+        sr[v] = f.at(n)[v] - 0.5 * dR;
+      }
+      auto to_prim_face = [&](Real* s) {
+        Prim q{};
+        q.rho = s[URHO];
+        q.u = s[UMX] / q.rho;
+        Real ys = 0.0;
+        for (int k = 0; k < NUM_SPECIES; k++) {
+          q.Y[k] = std::max(s[UFS + k] / q.rho, 0.0);
+          ys += q.Y[k];
+        }
+        for (int k = 0; k < NUM_SPECIES; k++) {
+          q.Y[k] /= ys;
+        }
+        const Real e = s[UEDEN] / q.rho - 0.5 * q.u * q.u;
+        q.T = 300.0;
+        eos.REY2T(q.rho, e, q.Y, q.T);
+        eos.RTY2P(q.rho, q.T, q.Y, q.p);
+        return q;
+      };
+      hllc(to_prim_face(sl), to_prim_face(sr), flx);
+    };
+    const Real F_mass = mdot;
+    const Real F_ener = mdot * Hofx(cs.L);
+    Real fe[NVAR], fm[NVAR];
+    face_flux(false, fe);
+    face_flux(true, fm);
+    const Real ee_ent = fe[UEDEN] - F_ener;
+    const Real ee_mat = fm[UEDEN] - F_ener;
+    const Real em_ent = fe[URHO] - F_mass;
+    const Real em_mat = fm[URHO] - F_mass;
+    std::snprintf(
+      buf, sizeof(buf),
+      "energy flux error: entropy %.3e, extrap_material %.3e (exact %.3e); "
+      "mass: %.2e vs %.2e (exact %.2e)",
+      ee_ent, ee_mat, F_ener, em_ent, em_mat, F_mass);
+    check(
+      std::abs(ee_mat) < 0.35 * std::abs(ee_ent) &&
+        std::abs(em_mat) < 0.5 * std::abs(em_ent),
+      "extrap_material corrects the boundary-face flux", buf);
+  }
+
+  // The reference: same sourced problem, outflow 4 L downstream.  It must
+  // HOLD the steady state; its residual drift is the discretisation floor.
+  Real pr[NS], gref[NS];
+  run(5 * n, 1.0, 0, pr, gref);
+  std::snprintf(
+    buf, sizeof(buf),
+    "reference <p> drift %.1f dyn/cm2 over %.0e s, du/dn %.0f -> %.0f (of "
+    "%.0f)",
+    pr[NS - 1] - pr[0], t_end, gref[0], gref[NS - 1], g0);
+  check(
+    std::abs(pr[NS - 1] - pr[0]) < 150.0,
+    "the manufactured steady state holds in the long domain", buf);
+
+  // The truncated domain has its OWN discrete attractor: cutting the ramp
+  // mid-structure and representing its continuation with 4 ghost cells
+  // shifts the balance point, for ANY ghost fill.  The oracle row measures
+  // that attractor -- it is the floor no ghost-cell closure can beat -- so
+  // the closures are judged by their distance from the oracle, not from the
+  // long reference.
+  std::printf(
+    "\n     sigma  ghost   <p>-<p>_ref at t_end/3 .. t_end   | du/dn at the "
+    "face\n");
+  Real pt[NS], gt[NS];
+  const char* label[3] = {"ent", "mat", "orc"};
+  auto row = [&](const Real sigma, const int mode) {
+    run(n, sigma, mode, pt, gt);
+    std::printf("    %6.2f  %5s  ", sigma, label[mode]);
+    for (int k = 1; k < NS; k++) {
+      std::printf(" %9.1f", pt[k] - pr[k]);
+    }
+    std::printf("   | %5.0f -> %5.0f (exact %.0f)\n", gt[0], gt[NS - 1], g0);
+    return pt[NS - 1] - pr[NS - 1];
+  };
+
+  const Real e_orc = row(1.0, 2);
+  const Real g_orc = gt[NS - 1];
+  const Real e1_orc = pt[1] - pr[1];
+  const Real e_ent1 = row(1.0, 0);
+  const Real g_ent = gt[NS - 1];
+  const Real e1_ent = pt[1] - pr[1];
+  const Real e_ent4 = row(4.0, 0);
+  const Real e_mat1 = row(1.0, 1);
+  const Real g_mat = gt[NS - 1];
+  const Real e1_mat = pt[1] - pr[1];
+
+  // What the oracle row establishes: a ghost fill that carries the exact
+  // continuation HOLDS the sustained front, in this same truncated domain,
+  // with this same solver -- so nothing below can be blamed on the
+  // architecture.  What the late-time columns then measure is an artefact of
+  // the MANUFACTURED source: q(x) is frozen in space, so once a closure's
+  // early flux error has nudged the structure off its source the mismatch
+  // feeds itself and every non-oracle run walks to the same shifted
+  // equilibrium (~+27000 here, sigma-independent -- note sigma 1 vs 4).  A
+  // real flame carries its source with its front and has no such mode, which
+  // is why the gates below sit inside the boundary-equilibration window
+  // (t_end/3 ~ 0.7 relaxation times), where the columns still measure the
+  // boundary.
+  std::snprintf(
+    buf, sizeof(buf),
+    "late-time error: ent %.1f, mat %.1f, oracle %.1f -- the frozen source, "
+    "not the boundary",
+    e_ent1, e_mat1, e_orc);
+  report("the truncated MMS walks off its source at late time", buf);
+  std::snprintf(
+    buf, sizeof(buf), "sigma 1 -> 4 at late time: %.1f -> %.1f (the C9(a) "
+    "bias would fall x4)",
+    e_ent1, e_ent4);
+  report("the late-time offset is not the C9(a) bias", buf);
+
+  std::snprintf(
+    buf, sizeof(buf),
+    "error at 0.7 tau: %.1f with extrap_material, %.1f without, oracle %.1f",
+    e1_mat, e1_ent, e1_orc);
+  check(
+    std::abs(e1_mat - e1_orc) < 0.35 * std::abs(e1_ent - e1_orc),
+    "extrap_material holds the front while the boundary equilibrates", buf);
+
+  std::snprintf(
+    buf, sizeof(buf),
+    "du/dn at t_end: %.0f with, %.0f without, oracle %.0f (exact %.0f)", g_mat,
+    g_ent, g_orc, g0);
+  check(
+    std::abs(g_mat - g_orc) < 0.5 * std::abs(g_ent - g_orc),
+    "extrap_material preserves the structure the oracle preserves", buf);
 }
 
 // C7: the reaction source term.  Chemistry changes the pressure only through
@@ -1629,6 +2077,10 @@ main(int argc, char* argv[])
     check_ghost_pressure_bias();
     std::printf("\nC10 does that bias drive the solution? (source-free)\n");
     check_extrapolation_drives_solution();
+    std::printf(
+      "\nC11 the sustained ramp: a front on the outflow with an exact steady "
+      "solution\n");
+    check_sustained_ramp();
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }

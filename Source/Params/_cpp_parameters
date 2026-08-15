@@ -155,6 +155,17 @@ bc_nscbc_pin_farfield       bool          false
 # false because it changes every outflow result.
 bc_nscbc_extrap_temperature bool          false
 
+# Continue the material (non-acoustic) part of the incoming invariant R_- into
+# the ghost at an outflow, in addition to the relaxation increment.  The
+# interior slope of R_- is zero for a pure outgoing acoustic wave and equals
+# the dilatational du/dn for material structure crossing the face, so this
+# cancels the ghost-pressure bias measured by check C9(a) in
+# Verification/NSCBC1D -- the dominant error at a front-crossing outflow --
+# at any sigma, without touching the reflection behaviour.  Keep sigma > 0
+# with this on.  Default false because it changes every outflow result.
+# Ignored by bc_nscbc_pin_farfield.  See Source/NSCBC.H.
+bc_nscbc_extrap_material    bool          false
+
 # NOTE: pelec.nscbc_adv and pelec.nscbc_diff were removed here.  They were
 # declared and queried but never read by any live code path -- the
 # Ghost-Cell NSCBC implementation they controlled was deleted with the rest
