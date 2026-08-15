@@ -157,13 +157,14 @@ bc_nscbc_extrap_temperature bool          false
 
 # Continue the material (non-acoustic) part of the incoming invariant R_- into
 # the ghost at an outflow, in addition to the relaxation increment.  The
-# interior slope of R_- is zero for a pure outgoing acoustic wave and equals
-# the dilatational du/dn for material structure crossing the face, so this
-# cancels the ghost-pressure bias measured by check C9(a) in
-# Verification/NSCBC1D -- the dominant error at a front-crossing outflow --
-# at any sigma, without touching the reflection behaviour.  Keep sigma > 0
-# with this on.  Default false because it changes every outflow result.
-# Ignored by bc_nscbc_pin_farfield.  See Source/NSCBC.H.
+# material slope is bounded through the entropy family (outgoing, carries no
+# acoustics), which cancels the ghost-pressure bias of check C9(a) in
+# Verification/NSCBC1D without touching reflection, anchoring or the
+# relaxation rate.  For a front SITTING on the outflow it is worth 5% alone
+# and 42% together with bc_nscbc_extrap_temperature; for a front PASSING OUT
+# through the face it is a liability -- at small sigma the quasi-steady model
+# turns the crossing into a runaway (see NSCBC-FlameOutflow/README.md).  Keep
+# sigma > 0 with this on.  Default false.  Ignored by pin_farfield.
 bc_nscbc_extrap_material    bool          false
 
 # NOTE: pelec.nscbc_adv and pelec.nscbc_diff were removed here.  They were

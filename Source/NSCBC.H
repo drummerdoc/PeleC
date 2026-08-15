@@ -320,10 +320,21 @@ struct Params
   // amplifying.  Keep sigma > 0 with this on: the relaxation increment is
   // still the only anchoring.
   //
+  // Measured (Exec/RegTests/NSCBC-FlameOutflow, quasi-frozen front, sigma=1):
+  // 5% alone, 42% together with extrap_temperature -- the two closures
+  // compound into a fully consistent material continuation.  Measured on the
+  // exit test of the same case (a front actually LEAVING at U = 40 S_L):
+  // at sigma = 0.25 the continuation turns the crossing into a runaway that
+  // drains the domain and quenches the flame -- the quasi-steady model does
+  // not describe a fast transit, and the weak relaxation cannot answer for
+  // it.  At sigma = 16 it is safe but unhelpful.
+  //
   // Default false: it changes outflow results near structures, so it is
-  // opt-in, like extrap_temperature.  Turn it on when material structure (a
-  // flame, a density front, a wake) crosses the outflow.  pin_farfield
-  // ignores it: a value pin has no slot for a slope.
+  // opt-in, like extrap_temperature.  Turn it on for material structure that
+  // SITS near the outflow (a held or slowly drifting flame, a density
+  // gradient, a wake); leave it off, or pair it with a large sigma, when a
+  // front actually passes out through the face.  pin_farfield ignores it: a
+  // value pin has no slot for a slope.
   bool extrap_material = false;
 
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per

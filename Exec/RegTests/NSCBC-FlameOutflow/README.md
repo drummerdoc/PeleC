@@ -270,6 +270,103 @@ Measured here, at t = 2.4×10⁻⁵ s, mean Δp against the shielded reference:
 | σ = 16, β = 0.5, β_s = 0 | +218 | **+67** | **−69%** |
 | hard `p = p_amb` | −527 | — | — |
 
+## The material continuation (`bc_nscbc_extrap_material`), and what it settles
+
+The ghost-pressure bias of the previous section has a targeted fix:
+continue the *material* part of the incoming invariant's slope into the
+ghost, bounded through the entropy family so the incoming model never feeds
+on the waves it launches (`Source/NSCBC.H`; gated by checks C9(a) and C11 in
+`Verification/NSCBC1D`, where it removes the bias exactly and holds a
+manufactured sustained front that the entropy closure walks away from).
+
+Measured here, σ = 1, β = 0.5, β_s = 0, t = 2.4×10⁻⁵ s, mean Δp:
+
+| closure | mean Δp | change |
+|---|---|---|
+| entropy | +2074 | — |
+| + material | +1972 | −5% |
+| + temperature | +1894 | −9% |
+| + **material and temperature** | **+1200** | **−42%** |
+
+Two conclusions, and the first one closes an open question.
+
+**The extrapolation bias is real but is not what dominates this case.** The
+fix removes the C9(a) mechanism *exactly* in the driver and buys 5% here, so
+the σ-suppressed error of this configuration is mostly something else — by
+the bisection above and the C9(b) result, the unmodelled diffusive and
+reactive enthalpy deposition in the boundary cells. That also answers the
+question the C9/C10 commits left open, **against** the flux-form
+reformulation's premise: a flux-form NSCBC removes the same extrapolation
+bias, so it too would buy ~5% here, at many times the cost.
+
+**The two ghost closures compound.** Together they make the ghost a fully
+consistent material continuation — p from the corrected acoustic pair, u
+from the continued slope, T extrapolated, ρ from the EOS — and take 42%
+where each alone takes single digits. Note two caveats: at U = 2 S_L the
+quasi-steady bound in the material continuation underestimates the front's
+true slope by 2× (the sheet drifts at S_L = U/2), so this configuration is
+near its worst case; and the continuation is for *quasi-steady* structure —
+see the exit test below before enabling it anywhere a front actually crosses.
+
+## The exit test — `nscbc-flameexit.inp`
+
+This case's original question was always "what happens when the flame
+reaches the outflow", and the quasi-frozen configuration answers it only for
+a front that *sits* there. `nscbc-flameexit.inp` makes the sheet actually
+leave: U = 40 S_L, the sheet initialised fully inside, and the whole passage
+— approach, crossing, exit, emptied domain — inside 6×10⁻⁴ s. The wrinkle
+keeps the parent's slope (51° tilt at the crossings) and the grid keeps the
+parent's dx. Physics fixes the truth during transit (the front must advect
+at U − S_L ≈ 889 cm/s with its wrinkle frozen; the decay times are 100× the
+window), and after the exit the exact solution is known outright: a uniform
+fresh stream at (U, p_amb, T_in). `exit_metrics.py` tracks both.
+
+| outflow | transit: peak mean Δp | front | wrinkle | post-exit residual Δp, rms(u−U) |
+|---|---|---|---|---|
+| hard `p = p_amb` | −200 | on schedule | held | **+1.2, 0.01** |
+| **σ = 16 + extrap_T** | +1800 | on schedule | held | **+8.5, 0.20** |
+| σ = 16 + extrap_T + extrap_material | −3520 | on schedule | held | +8.5, 0.20 |
+| σ = 0.25 (the shipped default) | +37000 → **NaN, crash** | pushed *backwards* | grows 40% | — |
+| σ = 0.25 + extrap_T + extrap_material | **−340000**, flame quenched | expelled | destroyed | recovering on τ = 1/K |
+| `pin_farfield` + extrap_T | +12000, persistent | 40% slow | distorted | +17500, 460 |
+
+What the table says, in order of importance.
+
+**The shipped default destroys the flame and then the run.** At σ = 0.25
+the anchoring time τ = L/(σc) is comparable to the transit itself, so the
+boundary integrates the crossing's flux imbalance into a pressure ramp that
+pushes the front back upstream, pumps the wrinkle amplitude 40%, and NaNs at
+t = 2×10⁻⁴ s. This is not a tuning nuance; it is the difference between the
+run completing and not.
+
+**A fast dilatational transit wants anchoring, not transparency.** The
+crossing is not an acoustic event: what leaves is mass and enthalpy at
+M ~ 0.01, whose own pressure field is p_amb to one part in 10⁴. The hard
+Dirichlet — the *worst* acoustic boundary in this suite, R = 97% — handles
+it almost perfectly, and among characteristic treatments the quality ranking
+is exactly the anchoring-strength ranking. σ = 16 + `extrap_temperature`
+exits the flame with front kinematics and wrinkle amplitude
+indistinguishable from the hard-outflow truth, a transient of 0.18% of
+ambient, and a domain that returns to the exact uniform stream to 8 parts
+per million. The ~28% acoustic reflection that σ = 16 costs elsewhere never
+appears, because there is nothing acoustic to reflect.
+
+**`extrap_material` is for fronts that stay, not fronts that leave.** At
+σ = 0.25 the continuation turns the crossing into a runaway: the entropy
+bound is wide open while the front is in the boundary cells, the continued
+slopes over-vent the domain, the weak relaxation cannot answer, and the
+domain drains to −0.34 atm — cold enough to quench the flame before it
+finishes leaving. At σ = 16 the same mechanism is bounded (the transit dip
+doubles relative to extrap_T alone, and the run is otherwise clean), so a
+strong σ makes the flag safe but not helpful here. Its measured value is the
+quasi-frozen table above.
+
+**`pin_farfield` anchors a through-flow duct to the wrong state.** It is
+stable, but it holds p + ρcu rather than p, so the whole operating point
+shifts: the stream runs 460 cm/s slow, the front crosses 40% late, and the
+domain settles +17500 dyn/cm² off ambient and stays there. Use it for the
+quiescent-reservoir case it was built for, not for an exit with a mean flow.
+
 The two rows say something worth reading carefully. At σ = 1 the ghost-pressure
 bias of the previous section still dominates, so removing the diffusive error
 buys only 9%. At σ = 16 that bias is largely suppressed, the diffusive error is

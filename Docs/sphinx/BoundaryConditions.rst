@@ -293,10 +293,36 @@ entropy bound vanishes and nothing changes (reflection, anchoring and the relaxa
 ``Verification/NSCBC1D``). Check C11 gates it on a manufactured flame — a sustained velocity/density ramp with an exact
 steady solution straddling the outflow: the entropy closure drifts by :math:`15707\ {\rm dyn/cm^2}` while the boundary
 equilibrates and distorts :math:`\partial u/\partial n` at the face to 175% of its exact value; with this flag the drift
-is :math:`3175` and the face gradient stays within the band a ghost fill of the *exact* continuation also occupies. Its
-known cost, measured by C10: it continues whatever material structure it sees, so a *transient* structure that ought to
-decay away right at the boundary is held there longer. Keep :math:`\sigma > 0` with this on — the relaxation increment
-is still the only anchoring.
+is :math:`3175` and the face gradient stays within the band a ghost fill of the *exact* continuation also occupies.
+
+Measured in ``Exec/RegTests/NSCBC-FlameOutflow`` (quasi-frozen front on the outflow, :math:`\sigma = 1`): 5% alone —
+which settles the open question from the C9/C10 commits: the extrapolation bias is real and exactly reproducible, but it
+is **not** what dominates a reacting front-crossing outflow, whose residual points at the unmodelled diffusive and
+reactive enthalpy deposition in the boundary cells. Combined with ``bc_nscbc_extrap_temperature``, however, the two
+closures compound to **42%** — together they make the ghost a fully consistent material continuation.
+
+Its sharp edge is a front that *leaves*. The continuation is a quasi-steady model, and during a fast transit at small
+:math:`\sigma` it turns the crossing into a runaway (see *A structure leaving through the outflow* below): use it for
+fronts that sit near the boundary, keep :math:`\sigma > 0` always — the relaxation increment is still the only
+anchoring — and prefer it off, or paired with a large :math:`\sigma`, when structures actually cross.
+
+A structure leaving through the outflow
+"""""""""""""""""""""""""""""""""""""""
+
+``Exec/RegTests/NSCBC-FlameOutflow`` (``nscbc-flameexit.inp``) measures a wrinkled flame sheet *actually leaving* at
+U = 40 :math:`S_L`, with the passage complete inside the run and the post-exit truth known exactly (a uniform fresh
+stream). The result inverts the acoustic intuition this page is otherwise built on:
+
+* A fast dilatational transit wants **anchoring, not transparency**. What crosses is mass and enthalpy at low Mach,
+  with essentially no acoustic content, and every treatment ranks by anchoring strength: the hard Dirichlet is
+  near-perfect; :math:`\sigma = 16` + ``extrap_temperature`` exits the flame with front kinematics and wrinkle
+  amplitude indistinguishable from it (transient 0.18% of ambient, final state exact to 8 ppm) — and the ~28% acoustic
+  reflection that :math:`\sigma = 16` costs elsewhere never appears, because nothing acoustic is present.
+* The inert default :math:`\sigma = 0.25` is **unstable** for a transit: the anchoring time is comparable to the
+  crossing, the flux imbalance integrates into a pressure ramp that pushes the front back upstream, pumps the wrinkle,
+  and the run dies. Raise :math:`\sigma` to O(10) *before* a front reaches the outflow.
+* ``pin_farfield`` is stable but anchors a through-flow duct to :math:`p + \rho c u` — the operating point shifts and
+  stays shifted. Reservoir boundaries only.
 That is simultaneously non-reflecting and anchored, which a rate-based relaxation cannot be, but it anchors to
 :math:`p_{\rm target} + \rho c u_n` rather than to :math:`p_{\rm target}`, and because it constrains a *value*
 rather than a rate its effective relaxation rate is :math:`c/\Delta x` and it does not converge under mesh
@@ -385,6 +411,11 @@ when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
                                                     :math:`\sigma` to O(10) and accept the reflection, or
                                                     use ``pin_farfield`` and accept a fixed offset of order
                                                     :math:`\rho c\, u_{\rm out}`.
+   A flame or front must pass OUT through the       Raise :math:`\sigma` to O(10) and set
+   outflow                                          ``extrap_temperature = 1`` before it arrives. The
+                                                    default :math:`\sigma = 0.25` can push the front back
+                                                    and crash the run; ``extrap_material`` off during the
+                                                    transit. See *A structure leaving through the outflow*.
    Mean pressure off target at a reacting outflow,  Expected. :math:`\beta_s` is a second-order correction
    and ``beta_s`` does not help                     on top of a first-order problem; the error is driven by
                                                     :math:`\partial u_{\rm out}/\partial n`, not by the heat

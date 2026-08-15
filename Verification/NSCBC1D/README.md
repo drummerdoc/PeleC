@@ -25,7 +25,7 @@ to exercise check C7, which is skipped otherwise:
 
 ```sh
 cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
-cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 26/26
+cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 52/52 (air: 48/48)
 ```
 
 Nothing in the driver may assume a particular mechanism. The first version of
@@ -54,6 +54,12 @@ relationships rather than on hard-coded numbers.
 | **C5** | The relaxation is a **rate**: grid-independent, and equal to `K = σ(1−M²)c/L` | The parameterisation has drifted to a value-blend, whose effective rate scales as `c/Δx` and therefore doubles when the mesh does |
 | **C6** | Supersonic, reversed-flow and EB-body-state fallbacks each return a finite physical state and increment their counter | A silent fallback — i.e. a bug that will not be found in production |
 | **C7** | The closed-form reaction source `dp/dt|_react` matches a directional finite difference along the reaction path, converging as τ→0; chemistry conserves mass; a cold state gives zero | The thermodynamics of `reaction_dpdt()` is wrong. Skipped automatically when the mechanism has no reactions |
+| **C8** | On a flame-like temperature ramp the entropy closure's ghost overstates the face temperature gradient by 40%; `extrap_temperature` reproduces the ramp exactly and still returns a uniform state to round-off | The diffusion operator reads these ghosts, so this is the conductive heat flux leaving the domain being wrong |
+| **C9** | (a) Extrapolating `R₊` across a normal velocity gradient manufactures ghost pressure `½ρc·ℓ·δu`, exactly, and order 1 gives exactly zero. With `extrap_material`, on the mass-conserving form of the same ramp, the bias vanishes while the ghost keeps the full `du/dn`. (b) A heat band at the boundary produces a σ-suppressed offset that the order control shows is *not* the extrapolation — reported, not gated | The ghost-pressure bias mechanism, isolated. (b) failing to isolate it dynamically is why C10 and C11 exist |
+| **C10** | The source-free ramp: mass/momentum-consistent, no sustainer. Its own negative result — a source-free expansion cannot persist in a duct — plus a reported row showing `extrap_material` holds a *decaying* ramp alive at the face, which is its known cost | Nothing; the gated content moved to C11 |
+| **C11** | The sustained ramp: C10's structure plus the manufactured energy source `S_E = ṁ dH/dx` that makes it an exact steady solution straddling the outflow — a flame's mechanical structure minus the chemistry. An *oracle* ghost fill (exact continuation) holds it, so the architecture is sound; the entropy closure drifts 15707 dyn/cm² in 0.7 relaxation times and distorts the face `du/dn` to 175% of exact; `extrap_material` holds those to 3175 and 80%, and cuts the static face-flux error 3.3× | The material-slope continuation is broken, or the late-time columns are being read without their caveat: the frozen source cannot follow a structure the boundary lets slip, so late-time drift is the MMS's artefact, not the boundary's |
+
+The C11 oracle row is the load-bearing negative control: it separates "the ghost-cell *form* cannot do this" (false — the oracle holds the front indefinitely) from "this particular *closure* cannot" (true for the entropy closure, mostly fixed by `extrap_material`).
 
 ## Reference results
 

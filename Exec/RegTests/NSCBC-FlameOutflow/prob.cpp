@@ -32,6 +32,13 @@ read_pmf(const std::string& myfile)
   int line_count;
 
   std::ifstream infile(myfile);
+  if (!infile.good()) {
+    // Without this, a missing file hands the quote parser an empty first
+    // line, and `pos1 < firstline.length() - 1` underflows to SIZE_MAX: the
+    // run hangs forever inside amrex_probinit with no message.  (The
+    // original in Exec/RegTests/PMF has the same trap.)
+    amrex::Abort("read_pmf: cannot open prob.pmf_datafile = " + myfile);
+  }
   const std::string memfile = read_pmf_file(infile);
   infile.close();
   std::istringstream iss(memfile);
