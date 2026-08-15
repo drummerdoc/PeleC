@@ -62,9 +62,13 @@ provide it is unaffected. A face must be ``Hard`` or ``UserBC`` for the treatmen
    By default (``bc_nscbc_beta = bc_nscbc_beta_s = 1``) the implementation is the **1-D-normal LODI limit**: the
    modelled incoming waves carry neither transverse nor reaction terms. Setting :math:`\beta < 1` enables the
    transverse terms and is worth a factor of a few whenever the boundary is met obliquely — see *Transverse terms*
-   below. :math:`\beta_s < 1` enables the reaction source. The **viscous** contribution to the incoming wave is
-   genuinely absent. Place an outflow away from flames regardless: see *What a front crossing the outflow actually
-   costs*, which makes that advice quantitative rather than folkloric.
+   below. :math:`\beta_s < 1` enables the reaction source. There is deliberately no **viscous** contribution to the
+   modelled incoming wave, and that is a measured decision rather than a gap: in the ghost-cell form the diffusion
+   operator reads these same ghost cells, so a correct ghost closure (``bc_nscbc_extrap_temperature``, gated
+   statically by C8 and dynamically by C12 in ``Verification/NSCBC1D``) already carries the diffusive physics — an
+   amplitude-side diffusion term was built, verified exact, measured to double-count (1-D: 104 → −911 dyn/cm²;
+   PeleC flame-outflow: +1200 → +1771), and removed. Place an outflow away from flames regardless: see *What a front
+   crossing the outflow actually costs*, which makes that advice quantitative rather than folkloric.
 
 Transverse terms
 """"""""""""""""""""
@@ -222,7 +226,7 @@ needs to be changed.
    ==================================  =========  ==========================================================
    ``pelec.bc_nscbc``                  0          Master switch.
    ``pelec.bc_nscbc_sigma``            0.25       Outflow pressure relaxation (Poinsot-Lele :math:`\sigma`).
-   ``pelec.bc_nscbc_relax_u``          2.0        Inflow normal-velocity relaxation.
+   ``pelec.bc_nscbc_relax_u``          2.0        Inflow normal-velocity relaxation; measured curve below.
    ``pelec.bc_nscbc_relax_t``          0.2        Inflow temperature and tangential-velocity relaxation.
    ``pelec.bc_nscbc_beta``             1.0        Transverse-term weight. 1 = off; **try 0.5**.
    ``pelec.bc_nscbc_beta_s``           1.0        Reaction-source weight. 1 = off.
@@ -261,6 +265,20 @@ before the pressure is pulled back, and much smaller than the run time, so that 
 PeleC prints both at startup. Rudy and Strikwerda (*JCP* **36**, 55, 1980) find :math:`\sigma \approx 0.27` optimal
 for a 1-D pulse; the usual band is 0.15-0.3. :math:`\sigma = 0` is *perfectly* non-reflecting and leaves the mean
 pressure entirely unanchored.
+
+``bc_nscbc_relax_u`` has a measured acoustic meaning, not just a stability band. A pulse riding a mean inflow and
+reflecting off the inlet gives (``Verification/NSCBC1D``, C4):
+
+.. table::
+
+   ============  =====  ====  ====  ====
+   ``relax_u``   0.5    2.0   10    50
+   R             2.3%   4.8%  19%   57%
+   ============  =====  ====  ====  ====
+
+Soft inlets swallow acoustics and hold their target loosely; stiff ones hold the target and reflect like walls. The
+default 2.0 reflects under 5%. Choose from this curve: if acoustics must die at the inlet, stay at or below 2; if the
+mass flux must be held tightly against a noisy chamber, go toward 10 and accept the reflection.
 
 ``bc_nscbc_pin_farfield`` replaces the relaxation by a hard pin of the incoming invariant to its far-field value.
 
@@ -431,6 +449,12 @@ when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
                                                     the realised one.
    ``flow reversal`` count sustained above zero     The outflow is misplaced, or the face should be an
                                                     inflow. Transient counts are benign.
+   ``material structure`` advisory printed          A front, flame or density gradient is sitting in the
+                                                    outflow boundary cells (|dS| > 5% of ρ per cell). If it
+                                                    is about to CROSS, raise :math:`\sigma` to O(10) first —
+                                                    the 0.25 default can push the front back and abort the
+                                                    run — and keep ``extrap_material`` off during the
+                                                    transit.
    ``EB body state`` count above zero               Covered cells are adjacent to the boundary face; the
                                                     stencil order was degraded to avoid them.
    ===============================================  ==========================================================

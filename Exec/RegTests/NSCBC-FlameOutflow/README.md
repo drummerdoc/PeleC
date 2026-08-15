@@ -299,6 +299,14 @@ question the C9/C10 commits left open, **against** the flux-form
 reformulation's premise: a flux-form NSCBC removes the same extrapolation
 bias, so it too would buy ~5% here, at many times the cost.
 
+**The residual is not an unmodelled diffusive source either.** The natural next hypothesis — supply the missing
+"viscous condition" as a dp/dt|_diffusion term in the modelled incoming wave — was built, verified exact on
+quadratic profiles, and refuted by measurement: it moves this case from +1200 to +1771, and the 1-D conduction
+test (C12) from +104 to −911. In the ghost-cell form the diffusion operator reads the ghost cells, so
+`extrap_temperature` already carries the diffusive physics and an amplitude-side term counts it twice. What
+remains of the σ = 1 error is therefore multi-dimensional (the tilted front's tangential structure) and/or the
+2× under-continuation of the material bound at U = 2 S_L — not a missing 1-D source term.
+
 **The two ghost closures compound.** Together they make the ghost a fully
 consistent material continuation — p from the corrected acoustic pair, u
 from the continued slope, T extrapolated, ρ from the EOS — and take 42%

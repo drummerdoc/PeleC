@@ -237,6 +237,10 @@ mm(Real a, Real b)
 }
 
 // One SSP-RK2 stage: conserved-variable MUSCL with minmod slopes.
+// Optional constant-conductivity conduction in the mini solver, for C12: the
+// energy flux gains -lambda dT/dx at every face.  Zero (off) everywhere else.
+Real g_lambda = 0.0;
+
 void
 stage(const Field& in, Field& out, Real dx, Real dt)
 {
@@ -273,6 +277,14 @@ stage(const Field& in, Field& out, Real dx, Real dt)
       return q;
     };
     hllc(to_prim(sl), to_prim(sr), &flux[static_cast<size_t>(i) * NVAR]);
+    if (g_lambda > 0.0) {
+      // Conduction between the adjacent CELL CENTRES, like PeleC's diffusion
+      // operator: at i = 0 and i = n this reads a ghost temperature, so the
+      // outflow's ghost closure IS the boundary heat flux here too.
+      // UEDEN only: stage() recomputes UEINT from UEDEN afterwards.
+      flux[static_cast<size_t>(i) * NVAR + UEDEN] -=
+        g_lambda * (in.at(i)[UTEMP] - in.at(i - 1)[UTEMP]) / dx;
+    }
   }
   for (int i = 0; i < n; i++) {
     for (int v = 0; v < NVAR; v++) {
@@ -703,6 +715,118 @@ reflection_coefficient(
   return peak_out / peak_in;
 }
 
+// The inflow-side analogue of the outflow measurement above: a LEFT-running
+// pulse into a characteristic inflow holding a quiescent target, reflection
+// measured in the right half after the bounce.  A soft inflow (small relax_u)
+// lets the pulse push the boundary and swallows most of it; a stiff one is a
+// Dirichlet condition in disguise and reflects like a wall.  This curve is
+// how relax_u should be chosen, and it did not exist before: C2 checks only
+// the relaxation DIRECTIONS at an inflow.
+Real
+inflow_reflection(Real relax_u, int n)
+{
+  Case cs;
+  cs.n = n;
+  Field f(cs.n), g(cs.n), h(cs.n);
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  auto eos = pele::physics::PhysicsType::eos();
+  const Real dx = cs.L / cs.n;
+
+  const Real amp = 1.0e-3;
+  const Real x0 = 0.65 * cs.L, w = 0.04 * cs.L;
+  Real rho_ref = 0.0, e_ref = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho_ref, e_ref);
+  const Prim qref = [&] {
+    Prim q{};
+    q.rho = rho_ref;
+    q.u = 0.0;
+    q.p = cs.p0;
+    q.T = cs.T0;
+    for (int k = 0; k < NUM_SPECIES; k++) {
+      q.Y[k] = Y[k];
+    }
+    return q;
+  }();
+  const Real c0 = sound_speed(qref);
+
+  // A base INFLOW is required: with a quiescent target the incident pulse
+  // pushes gas out through the inflow face, the kernel's reversal guard
+  // (correctly) drops to a zero-gradient copy, and the "inflow" being
+  // measured is not the inflow model at all -- every relax_u then returns
+  // R = 0.  The pulse's velocity perturbation (~24 cm/s) rides on u0 = 2000
+  // cm/s, so the face stays an inflow throughout.
+  const Real u0 = 2.0e3;
+  for (int i = -NG; i < cs.n + NG; i++) {
+    const Real x = (i + 0.5) * dx;
+    const Real dp = amp * cs.p0 * std::exp(-std::pow((x - x0) / w, 2));
+    // LEFT-running isentropic pulse: u' = -dp/(rho c).
+    const Real p = cs.p0 + dp;
+    const Real rho = rho_ref + dp / (c0 * c0);
+    const Real u = u0 - dp / (rho_ref * c0);
+    Real T = 0.0;
+    eos.RYP2T(rho, Y, p, T);
+    set_state(f.at(i), rho, u, T, Y);
+  }
+
+  pc_nscbc::Params prm;
+  prm.L_ref = cs.L;
+  prm.sigma = 0.0; // hi outflow: perfectly non-reflecting, out of the way
+  prm.relax_u = relax_u;
+  prm.relax_t = 0.2;
+  pc_nscbc::Target in, out;
+  in.type = pc_nscbc::Type::inflow;
+  in.u[0] = u0;
+  in.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    in.Y[k] = Y[k];
+  }
+  out.type = pc_nscbc::Type::outflow;
+  out.p = cs.p0;
+
+  const Real t_end = 1.6 * cs.L / c0;
+  const Real t_measure = 0.9 * cs.L / c0; // pulse hits the inflow at ~0.65
+  Real t = 0.0;
+  Real peak_in = amp * cs.p0, peak_out = 0.0;
+
+  while (t < t_end) {
+    Real cmax = 0.0;
+    for (int i = 0; i < cs.n; i++) {
+      const Prim q = get_prim(f.at(i));
+      cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+    }
+    Real dt = cs.cfl * dx / cmax;
+    dt = std::min(dt, t_end - t);
+    if (dt <= 0.0) {
+      break;
+    }
+    fill_bcs(f, in, out, prm, dx);
+    stage(f, g, dx, dt);
+    fill_bcs(g, in, out, prm, dx);
+    stage(g, h, dx, dt);
+    for (int i = 0; i < cs.n; i++) {
+      for (int v = 0; v < NVAR; v++) {
+        f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+      }
+    }
+    t += dt;
+
+    if (t > t_measure) {
+      Real pbar = 0.0;
+      for (int i = 0; i < cs.n; i++) {
+        pbar += get_prim(f.at(i)).p;
+      }
+      pbar /= cs.n;
+      for (int i = cs.n / 2; i < cs.n; i++) {
+        peak_out = std::max(peak_out, std::abs(get_prim(f.at(i)).p - pbar));
+      }
+    }
+  }
+  return peak_out / peak_in;
+}
+
 void
 check_reflection(bool sweep)
 {
@@ -744,6 +868,24 @@ check_reflection(bool sweep)
   check(
     std::abs(drift_mat) < 2.0 * std::abs(drift) + 0.5,
     "extrap_material keeps the sigma anchoring", buf);
+
+  // The inflow curve.  R must rise monotonically with relax_u -- softer
+  // swallows more, stiffer walls more -- and the two ends must actually
+  // differ, or relax_u is a dial connected to nothing.
+  const Real Ri[4] = {
+    inflow_reflection(0.5, 400), inflow_reflection(2.0, 400),
+    inflow_reflection(10.0, 400), inflow_reflection(50.0, 400)};
+  std::snprintf(
+    buf, sizeof(buf),
+    "R = %.3f / %.3f / %.3f / %.3f at relax_u = 0.5 / 2 / 10 / 50",
+    Ri[0], Ri[1], Ri[2], Ri[3]);
+  check(
+    (Ri[0] <= Ri[1] * 1.05) && (Ri[1] <= Ri[2] * 1.05) &&
+      (Ri[2] <= Ri[3] * 1.05),
+    "inflow reflection rises monotonically with relax_u", buf);
+  check(
+    Ri[3] > 2.0 * Ri[0],
+    "relax_u spans soft to stiff (the ends differ)", buf);
 
   if (sweep) {
     std::printf("\n  sigma sweep (n=400, order=2)\n");
@@ -1164,6 +1306,20 @@ check_ghost_pressure_bias()
       std::abs(p_g1 - cs.p0) < 1.0e-6 * cs.p0,
       "the bias is carried entirely by the extrapolation", buf);
 
+    // The transit guard must stay quiet here: a velocity ramp at uniform
+    // density has dS = 0, and quiet-on-acoustics is the guard's whole value.
+    {
+      amrex::Long diag[pc_nscbc::Diag::count] = {0};
+      prm.order = 2;
+      pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, 1, out, prm, sg, diag);
+      std::snprintf(
+        buf, sizeof(buf), "structure count = %lld on a dS = 0 ramp",
+        static_cast<long long>(diag[pc_nscbc::Diag::structure]));
+      check(
+        diag[pc_nscbc::Diag::structure] == 0,
+        "transit guard is quiet without entropy structure", buf);
+    }
+
     // The fix, on the structure it exists for.  The uniform-density ramp
     // above is a synthetic state -- steady continuity does not admit it -- so
     // the entropy-family bound in extrap_material correctly sees nothing
@@ -1189,8 +1345,9 @@ check_ghost_pressure_bias()
 
       prm.order = 2;
       prm.extrap_material = true;
+      amrex::Long diag[pc_nscbc::Diag::count] = {0};
       for (int layer = 1; layer <= 2; layer++) {
-        pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, layer, out, prm, sg);
+        pc_nscbc::apply(sN, sM1, sM2, 3, dx, 0, -1, layer, out, prm, sg, diag);
         const Prim qg = get_prim(sg);
         const Real p_resid = qg.p - (cs.p0 + layer * dp_cell);
         std::snprintf(
@@ -1206,6 +1363,16 @@ check_ghost_pressure_bias()
           "extrap_material keeps the full du/dn in the ghost", buf);
       }
       prm.extrap_material = false;
+
+      // ... and the transit guard must FIRE here: this ramp's per-cell
+      // density change is far past the 5% threshold, and it is exactly the
+      // structure whose crossing the sigma = 0.25 default does not survive.
+      std::snprintf(
+        buf, sizeof(buf), "structure count = %lld on the mass-conserving ramp",
+        static_cast<long long>(diag[pc_nscbc::Diag::structure]));
+      check(
+        diag[pc_nscbc::Diag::structure] > 0,
+        "transit guard fires on material structure", buf);
     }
   }
 
@@ -2046,6 +2213,136 @@ check_reaction_source()
 #endif
 }
 
+// C12: where the diffusive capability gap actually lives.
+//
+//      Real conduction is switched on in the mini solver (g_lambda), so the
+//      boundary heat flux is formed from the ghost temperatures exactly as
+//      PeleC's diffusion operator forms it, and a temperature ramp is parked
+//      with its high-curvature flank in the short domain's outflow cells.
+//      Against a 5x shielded reference (the C10/C11 protocol), this gates
+//      DYNAMICALLY what C8 gates statically: the conductive boundary error
+//      belongs to the ghost TEMPERATURE CLOSURE, and extrap_temperature
+//      removes most of it.
+//
+//      It is also where a would-be "viscous condition" for the incoming wave
+//      went to die, and the numbers are worth keeping: a modelled
+//      dp/dt|_diffusion of the boundary cell (normal conduction + species
+//      diffusion of the resolved fields, EOS-exact on quadratic profiles to
+//      1e-9) moved the error measured here from +104 to -911 dyn/cm2, and
+//      PeleC's flame-outflow at sigma = 1 from +1200 to +1771.  In the
+//      ghost-cell form the diffusion operator READS the ghosts, so a correct
+//      ghost closure already carries the diffusive physics and an
+//      amplitude-side term double-counts it.  The term was removed; this
+//      check keeps the closure honest instead.
+void
+check_diffusive_dynamics(const Real lam_cond)
+{
+  const Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  char buf[256];
+
+  const int n = 200;
+  const Real dxs = cs.L / n;
+  const Real u0 = 3.0e2;
+  const Real wr = 1.0;
+  const Real Tratio = 4.0;
+  const Real xc = cs.L - wr; // high-curvature flank in the outflow cells
+  const Real t_end = 3.0e-4;
+  const int NS = 4;
+
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+
+  auto Tofx = [&](const Real x) {
+    const Real g = 0.5 * (1.0 + std::tanh((x - xc) / wr));
+    return cs.T0 * (1.0 + (Tratio - 1.0) * g);
+  };
+  auto init = [&](Field& f, const int nc) {
+    for (int i = -NG; i < nc + NG; i++) {
+      const Real x = (i + 0.5) * dxs;
+      const Real T = Tofx(x);
+      Real rho = 0.0, e = 0.0;
+      eos.PYT2RE(cs.p0, Y, T, rho, e);
+      set_state(f.at(i), rho, u0, T, Y);
+    }
+  };
+
+  auto run = [&](const int nc, const bool extrap_T, Real* pm) {
+    Field f(nc), g(nc), h(nc);
+    init(f, nc);
+    pc_nscbc::Params prm;
+    prm.L_ref = nc * dxs;
+    prm.sigma = 1.0;
+    prm.extrap_temperature = extrap_T;
+    pc_nscbc::Target off, out;
+    out.type = pc_nscbc::Type::outflow;
+    out.p = cs.p0;
+    Real t = 0.0;
+    int k = 0;
+    auto sample = [&](const int kk) {
+      Real psum = 0.0;
+      for (int i = 0; i < n; i++) {
+        psum += get_prim(f.at(i)).p;
+      }
+      pm[kk] = psum / n;
+    };
+    sample(k++);
+    while (k < NS) {
+      const Real t_next = t_end * static_cast<Real>(k) / (NS - 1);
+      while (t < t_next) {
+        Real cmax = 0.0;
+        for (int i = 0; i < nc; i++) {
+          const Prim q = get_prim(f.at(i));
+          cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+        }
+        Real dt = std::min(cs.cfl * dxs / cmax, t_next - t);
+        if (dt <= 0.0) {
+          break;
+        }
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(f.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(f, off, out, prm, dxs);
+        stage(f, g, dxs, dt);
+        for (int layer = 1; layer <= NG; layer++) {
+          set_state(g.at(-layer), rho0, u0, cs.T0, Y);
+        }
+        fill_bcs(g, off, out, prm, dxs);
+        stage(g, h, dxs, dt);
+        for (int i = 0; i < nc; i++) {
+          for (int v = 0; v < NVAR; v++) {
+            f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+          }
+        }
+        t += dt;
+      }
+      sample(k++);
+    }
+  };
+
+  g_lambda = lam_cond; // conduction ON, in both domains
+  Real pr[NS], p_ent[NS], p_tmp[NS];
+  run(5 * n, false, pr);
+  run(n, false, p_ent);
+  run(n, true, p_tmp);
+  g_lambda = 0.0;
+
+  const Real e_ent = p_ent[NS - 1] - pr[NS - 1];
+  const Real e_tmp = p_tmp[NS - 1] - pr[NS - 1];
+  std::snprintf(
+    buf, sizeof(buf),
+    "error vs shielded reference: entropy closure %.1f, extrap_temperature "
+    "%.1f (x%.2f)",
+    e_ent, e_tmp, e_tmp / (std::abs(e_ent) > 1e-30 ? e_ent : 1.0));
+  check(
+    std::abs(e_tmp) < 0.5 * std::abs(e_ent),
+    "resolved conduction is handled by the ghost T closure", buf);
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -2081,6 +2378,11 @@ main(int argc, char* argv[])
       "\nC11 the sustained ramp: a front on the outflow with an exact steady "
       "solution\n");
     check_sustained_ramp();
+
+    // Conductivity for C12, boosted ~100x above air so the conductive
+    // boundary error is well above every other error in the test.
+    std::printf("\nC12 the diffusive gap lives in the ghost T closure\n");
+    check_diffusive_dynamics(2.6e5);
 
     std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
   }

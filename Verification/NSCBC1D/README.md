@@ -25,7 +25,7 @@ to exercise check C7, which is skipped otherwise:
 
 ```sh
 cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
-cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 52/52 (air: 48/48)
+cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 57/57 (air: 53/53)
 ```
 
 Nothing in the driver may assume a particular mechanism. The first version of
@@ -58,6 +58,9 @@ relationships rather than on hard-coded numbers.
 | **C9** | (a) Extrapolating `R₊` across a normal velocity gradient manufactures ghost pressure `½ρc·ℓ·δu`, exactly, and order 1 gives exactly zero. With `extrap_material`, on the mass-conserving form of the same ramp, the bias vanishes while the ghost keeps the full `du/dn`. (b) A heat band at the boundary produces a σ-suppressed offset that the order control shows is *not* the extrapolation — reported, not gated | The ghost-pressure bias mechanism, isolated. (b) failing to isolate it dynamically is why C10 and C11 exist |
 | **C10** | The source-free ramp: mass/momentum-consistent, no sustainer. Its own negative result — a source-free expansion cannot persist in a duct — plus a reported row showing `extrap_material` holds a *decaying* ramp alive at the face, which is its known cost | Nothing; the gated content moved to C11 |
 | **C11** | The sustained ramp: C10's structure plus the manufactured energy source `S_E = ṁ dH/dx` that makes it an exact steady solution straddling the outflow — a flame's mechanical structure minus the chemistry. An *oracle* ghost fill (exact continuation) holds it, so the architecture is sound; the entropy closure drifts 15707 dyn/cm² in 0.7 relaxation times and distorts the face `du/dn` to 175% of exact; `extrap_material` holds those to 3175 and 80%, and cuts the static face-flux error 3.3× | The material-slope continuation is broken, or the late-time columns are being read without their caveat: the frozen source cannot follow a structure the boundary lets slip, so late-time drift is the MMS's artefact, not the boundary's |
+| **C12** | With real conduction in the mini solver and a hot flank in the outflow cells, against a shielded reference: the entropy closure leaks 887 dyn/cm² of boundary error, `extrap_temperature` holds it to 104 | The diffusive boundary physics lives in the ghost **T closure**, not in the wave model — an amplitude-side diffusion source term was built, verified exact on quadratic profiles, measured to double-count (104 → −911 here; +1200 → +1771 in PeleC), and removed |
+
+C4 also measures the **inflow** reflection curve: R = 2.3% / 4.8% / 19% / 57% at `relax_u` = 0.5 / 2 / 10 / 50 — soft inlets swallow acoustics, stiff ones are walls; the default reflects under 5%. And the kernel now carries a **transit guard**: an advisory counter (`material structure`) that fires when |dS| > 5% of ρ per cell sits in an outflow boundary cell — the configuration whose crossing the σ = 0.25 default does not survive.
 
 The C11 oracle row is the load-bearing negative control: it separates "the ghost-cell *form* cannot do this" (false — the oracle holds the front indefinitely) from "this particular *closure* cannot" (true for the entropy closure, mostly fixed by `extrap_material`).
 

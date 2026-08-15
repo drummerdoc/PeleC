@@ -466,7 +466,13 @@ enum : int {
   eos_failure,     // an EOS call returned a non-finite or non-positive value
   floored,         // a positivity floor was hit
   transverse_drop, // a transverse derivative was unavailable or unusable
-  source_drop,     // the reaction source term was unavailable or unusable
+  source_drop,     // a modelled source term was unavailable or unusable
+  structure,       // material structure sat in an outflow boundary cell:
+                   // |dS| > 5% of rho per cell.  ADVISORY, not a fallback --
+                   // if a front is crossing this outflow, sigma of O(10) is
+                   // what survives it, and the sigma = 0.25 default can push
+                   // the front back and abort the run (see the flame-exit
+                   // table in NSCBC-FlameOutflow/README.md).
   count
 };
 }
@@ -955,29 +961,42 @@ apply(
     }
   }
 
-  // Material-slope continuation of R_- (see Params::extrap_material).  The
-  // measured slope of R_- is used only within the bound supplied by the
-  // entropy family: dS carries no acoustic content and is an OUTGOING family
-  // at an outflow, so the incoming model never feeds on the waves it
-  // launches.  Both slopes are measured on the same stencil, in the same
-  // frozen-impedance variables, and with the same limiter as R_+.
+  // Entropy-family slope at the face: measured for two purposes below.  dS
+  // carries no acoustic content and is an OUTGOING family at an outflow, so
+  // nothing the incoming model consumes here can feed on the waves it
+  // launches.  Measured on the same stencil, in the same frozen-impedance
+  // variables, and with the same limiter as R_+.
   amrex::Real dRm = 0.0;
-  if (outflow_face && prm.extrap_material && linear && qNm1.ok && qNm2.ok) {
-    const amrex::Real Rm_Nm1 = n_sgn * qNm1.u[idir] - qNm1.p / rho_c;
-    const amrex::Real Rm_Nm2 = n_sgn * qNm2.u[idir] - qNm2.p / rho_c;
-    const amrex::Real dRm_meas = minmod(Rm_N - Rm_Nm1, Rm_Nm1 - Rm_Nm2);
-    // Entropy-family bound on the material velocity slope, from steady
-    // continuity through the face with the momentum-flux pressure gradient.
+  if (outflow_face && linear && qNm1.ok && qNm2.ok) {
     const amrex::Real inv_c2 = 1.0 / (c_N * c_N);
     const amrex::Real S_N = qN.rho - qN.p * inv_c2;
     const amrex::Real S_Nm1 = qNm1.rho - qNm1.p * inv_c2;
     const amrex::Real S_Nm2 = qNm2.rho - qNm2.p * inv_c2;
     const amrex::Real dS = minmod(S_N - S_Nm1, S_Nm1 - S_Nm2);
-    const amrex::Real du_mat = -u_out_N * dS / (qN.rho * one_m_M2);
-    dRm = minmod(dRm_meas, du_mat * (1.0 + mach));
-    if (!amrex::Math::isfinite(dRm)) {
-      dRm = 0.0;
-      bump(Diag::floored);
+
+    // The transit guard.  Material structure sitting in the outflow boundary
+    // cell is the configuration for which no dial at its default survives a
+    // crossing (the flame-exit table in NSCBC-FlameOutflow/README.md): count
+    // it and let nscbc_report_diagnostics() say so.  5% of rho per cell is
+    // well above acoustic or roundoff content and well below any front.
+    if ((layer == 1) && (std::abs(dS) > 0.05 * qN.rho)) {
+      bump(Diag::structure);
+    }
+
+    // Material-slope continuation of R_- (see Params::extrap_material): the
+    // measured slope of R_- is used only within the bound the entropy family
+    // supplies through steady continuity and the momentum-flux pressure
+    // gradient.
+    if (prm.extrap_material) {
+      const amrex::Real Rm_Nm1 = n_sgn * qNm1.u[idir] - qNm1.p / rho_c;
+      const amrex::Real Rm_Nm2 = n_sgn * qNm2.u[idir] - qNm2.p / rho_c;
+      const amrex::Real dRm_meas = minmod(Rm_N - Rm_Nm1, Rm_Nm1 - Rm_Nm2);
+      const amrex::Real du_mat = -u_out_N * dS / (qN.rho * one_m_M2);
+      dRm = minmod(dRm_meas, du_mat * (1.0 + mach));
+      if (!amrex::Math::isfinite(dRm)) {
+        dRm = 0.0;
+        bump(Diag::floored);
+      }
     }
   }
 
@@ -1007,6 +1026,19 @@ apply(
         bump(Diag::source_drop);
       }
     }
+    // There is deliberately NO diffusive source term here, and that is a
+    // measured decision, not an omission.  A dp/dt|_diffusion of the boundary
+    // cell -- normal conduction and mixture-averaged species diffusion of the
+    // resolved fields, converted through the EOS -- was built, verified exact
+    // on quadratic profiles, and measured: with real conduction in the 1-D
+    // driver the boundary error is 887 dyn/cm2 under the entropy closure,
+    // 104 under extrap_temperature, and adding the modelled term moves 104 to
+    // -911; in PeleC's flame-outflow at sigma = 1 it moves +1200 to +1771.
+    // The ghost-cell form does not HAVE the flux-form's viscous-condition
+    // gap: the diffusion operator reads these ghost cells, so a correct
+    // ghost closure (extrap_temperature, gated by C8 and C12) already
+    // carries the diffusive physics, and an amplitude-side term counts it
+    // twice.  See check C12 in Verification/NSCBC1D.
     Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dRm +
            static_cast<amrex::Real>(layer) * dx_normal * L_in /
              (lambda_in * rho_c);

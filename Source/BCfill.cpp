@@ -488,7 +488,10 @@ PeleC::nscbc_report_diagnostics()
     h[pc_nscbc::Diag::body_state] + h[pc_nscbc::Diag::eos_failure] +
     h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop] +
     h[pc_nscbc::Diag::source_drop];
-  if (amrex::ParallelDescriptor::IOProcessor() && (total > 0 || verbose > 1)) {
+  const amrex::Long structure = h[pc_nscbc::Diag::structure];
+  if (
+    amrex::ParallelDescriptor::IOProcessor() &&
+    (total > 0 || structure > 0 || verbose > 1)) {
     amrex::Print() << "  NSCBC fallbacks since last report:" << "  supersonic "
                    << h[pc_nscbc::Diag::supersonic] << ",  flow reversal "
                    << h[pc_nscbc::Diag::reversed] << ",  EB body state "
@@ -496,8 +499,22 @@ PeleC::nscbc_report_diagnostics()
                    << h[pc_nscbc::Diag::eos_failure] << ",  floored "
                    << h[pc_nscbc::Diag::floored] << ",  transverse dropped "
                    << h[pc_nscbc::Diag::transverse_drop]
-                   << ",  reaction source dropped "
+                   << ",  source dropped "
                    << h[pc_nscbc::Diag::source_drop] << "\n";
+    if (structure > 0) {
+      // Advisory, not a fallback: this is the configuration the flame-exit
+      // test showed the sigma = 0.25 default does not survive.
+      amrex::Print()
+        << "  NSCBC: material structure (|dS| > 5% of rho per cell) sat in "
+        << structure
+        << " outflow boundary-cell fills since the last report.\n"
+        << "         If a front is CROSSING this outflow, sigma of O(10) is "
+           "what survives it; the sigma = 0.25 default can push the front "
+           "back\n"
+        << "         and abort the run, and bc_nscbc_extrap_material should "
+           "be off during a transit.  See the BCs chapter and "
+           "NSCBC-FlameOutflow/README.md.\n";
+    }
   }
   amrex::Gpu::Device::streamSynchronize();
   nscbc_diag().assign(pc_nscbc::Diag::count, 0);

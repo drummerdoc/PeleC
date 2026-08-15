@@ -167,6 +167,7 @@ bc_nscbc_extrap_temperature bool          false
 # sigma > 0 with this on.  Default false.  Ignored by pin_farfield.
 bc_nscbc_extrap_material    bool          false
 
+
 # NOTE: pelec.nscbc_adv and pelec.nscbc_diff were removed here.  They were
 # declared and queried but never read by any live code path -- the
 # Ghost-Cell NSCBC implementation they controlled was deleted with the rest
