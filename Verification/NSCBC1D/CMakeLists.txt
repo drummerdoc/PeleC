@@ -15,6 +15,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PELEC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." CACHE PATH "PeleC root")
 set(PELE_MECHANISM "air" CACHE STRING "PelePhysics mechanism")
+# Fuego (ideal gas, the default) or SRK (real gas): the kernel restricts
+# itself to density-carrying EOS entry points precisely so that it compiles
+# and runs under SRK, and this switch is how that claim is checked.
+set(PELE_EOS "Fuego" CACHE STRING "EOS model: Fuego or SRK")
+# Passive advected scalars ride the lambda_0 family through pack_ghost;
+# a build with PELE_NUM_ADV > 0 is how that path is compiled and checked.
+set(PELE_NUM_ADV 0 CACHE STRING "Number of passive advected scalars")
 find_package(AMReX REQUIRED)
 
 set(PP "${PELEC_DIR}/Submodules/PelePhysics")
@@ -34,6 +41,16 @@ target_include_directories(nscbc1d PRIVATE
   ${PP}/Source/Utility/TurbInflow
   ${PP}/Source/Utility/Diagnostics
   ${PP}/Mechanisms/${PELE_MECHANISM})
+if (PELE_EOS STREQUAL "SRK")
+  # SRK forbids constant transport (PelePhysicsConstraints.H); pair it with
+  # Simple.  Nothing in the driver reads transport coefficients -- the C12
+  # conduction lives in the mini solver -- so the choice only has to compile.
+  set(PELE_EOS_DEF USE_SRK_EOS)
+  set(PELE_TRANS_DEF USE_SIMPLE_TRANSPORT)
+else ()
+  set(PELE_EOS_DEF USE_FUEGO_EOS)
+  set(PELE_TRANS_DEF USE_CONSTANT_TRANSPORT)
+endif ()
 target_compile_definitions(nscbc1d PRIVATE
-  USE_FUEGO_EOS USE_CONSTANT_TRANSPORT NUM_ADV=0 NUM_AUX=0)
+  ${PELE_EOS_DEF} ${PELE_TRANS_DEF} NUM_ADV=${PELE_NUM_ADV} NUM_AUX=0)
 target_link_libraries(nscbc1d PRIVATE AMReX::amrex_1d)

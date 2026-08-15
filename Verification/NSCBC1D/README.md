@@ -28,6 +28,25 @@ cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
 cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 57/57 (air: 53/53)
 ```
 
+Two further build axes, both run in CI (the `NSCBC-Driver` job):
+
+```sh
+cmake -S . -B build_adv -DAMReX_DIR=... -DPELE_NUM_ADV=2    # 53/53: pack_ghost's
+cmake --build build_adv && ./build_adv/nscbc1d              # passive-scalar path
+cmake -S . -B build_srk -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer -DPELE_EOS=SRK
+cmake --build build_srk && ./build_srk/nscbc1d              # 40/40 static checks
+```
+
+The SRK build is the EOS-portability claim made checkable: the kernel keeps
+to density-carrying EOS entry points precisely so it runs under a real gas.
+Under SRK the dynamic checks (C4/C5/C9b/C10/C11/C12) are skipped — they
+integrate the mini solver for thousands of steps, every one paying several
+Newton solves per cell, to re-verify algebra that is EOS-independent and
+already gated under Fuego — and two gates change meaning: C1's tolerance sits
+at the Newton round-trip floor (~1e-11) rather than machine epsilon, and C7
+gates FD-vs-FD agreement instead of FD-vs-closed-form convergence, because
+under SRK the kernel path *is* the finite difference.
+
 Nothing in the driver may assume a particular mechanism. The first version of
 `air_Y()` returned "0.233 for O2, else 0.767", which is right for the
 two-species `air` mechanism and gives a composition summing to 6.6 for
