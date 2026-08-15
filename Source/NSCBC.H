@@ -496,11 +496,16 @@ minmod(const amrex::Real a, const amrex::Real b) noexcept
   return (std::abs(a) < std::abs(b)) ? a : b;
 }
 
-// True if a state looks like EB body state rather than fluid.  PeleC fills
-// covered cells with -1 per component (IO.cpp) or with 0 when
-// eb_zero_body_state is set; either way the density is non-positive.  The
-// boundary functor has no EBCellFlag, so this predicate is how the stencil
-// notices.  Cheap, and it also catches genuinely broken states.
+// True if a state looks like EB body state rather than fluid.  The boundary
+// functor has no EBCellFlag, so this predicate is how the stencil notices,
+// and it works by non-positive density: the -1 fill of plotfile output
+// (IO.cpp) and the eb_zero_body_state = 1 in-simulation fill are both
+// caught.  PeleC's DEFAULT in-simulation body state is a sampled fluid
+// state -- positive density, indistinguishable from interior data -- which
+// is why read_params makes eb_zero_body_state = 1 mandatory whenever
+// bc_nscbc runs with EB geometry (found by the NSCBC-Acoustic EB test: the
+// counter read zero with a solid seated in the stencil).  Cheap, and it
+// also catches genuinely broken states.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE bool
 is_body_state(const amrex::Real s[NVAR]) noexcept
 {

@@ -440,6 +440,57 @@ pc_nullfill(
 {
 }
 
+void
+PeleC::nscbc_check_fine_faces() const
+{
+  if (!bc_nscbc || level == 0) {
+    return;
+  }
+  const amrex::Box& dom = geom.Domain();
+  for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+    for (int side = 0; side < 2; ++side) {
+      const int t = (side == 0) ? phys_bc.lo(dir) : phys_bc.hi(dir);
+      if ((t != PCPhysBCType::inflow) && (t != PCPhysBCType::user_bc)) {
+        continue; // not a face the characteristic treatment can reach
+      }
+      const int face = (side == 0) ? dom.smallEnd(dir) : dom.bigEnd(dir);
+      bool touches = false;
+      for (int i = 0; i < grids.size(); ++i) {
+        const amrex::Box& b = grids[i];
+        if (
+          ((side == 0) && (b.smallEnd(dir) == face)) ||
+          ((side == 1) && (b.bigEnd(dir) == face))) {
+          touches = true;
+          break;
+        }
+      }
+      // Once per face per run: regridding can recur every few steps, and a
+      // warning repeated 1600 times is a warning nobody reads.
+      static bool warned[AMREX_SPACEDIM][2] = {};
+      if (touches && !warned[dir][side] &&
+          amrex::ParallelDescriptor::IOProcessor()) {
+        warned[dir][side] = true;
+        // A warning rather than an abort: the problem hook decides per
+        // boundary POINT whether a face is characteristic, and the host
+        // cannot know what it will return.  But if any point of this face
+        // is characteristic, the fill's extrapolation stencil is
+        // level-local, so the fine patch imposes a DIFFERENT boundary
+        // condition than the coarse level does on the same face -- a
+        // level-dependent artefact that refining cannot remove.
+        amrex::Print()
+          << "\nNSCBC WARNING: level " << level << " grids touch the domain "
+          << (side == 0 ? "lo" : "hi") << " face in direction " << dir
+          << ", which is a Hard/UserBC face with pelec.bc_nscbc = 1.\n"
+          << "  The characteristic fill's stencil is level-local, so a "
+             "refined patch on a characteristic face makes the boundary\n"
+          << "  condition level-dependent.  Keep refinement away from "
+             "characteristic faces (see the BCs chapter).\n"
+          << "  (This warning is printed once per face.)\n\n";
+      }
+    }
+  }
+}
+
 pc_nscbc::Params
 PeleC::nscbc_params(const int idir)
 {

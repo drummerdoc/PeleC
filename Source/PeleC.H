@@ -104,6 +104,13 @@ public:
   // that will not be found; this is how it surfaces.
   static void nscbc_report_diagnostics();
 
+  // Warn when THIS refined level's grids touch a domain face that the
+  // characteristic treatment can reach (Hard/UserBC): the extrapolation
+  // stencil is level-local, so a fine patch on such a face makes the
+  // boundary condition level-dependent.  Called from post_regrid and
+  // post_init; no-op on level 0 or when bc_nscbc is off.
+  void nscbc_check_fine_faces() const;
+
   // Restart from a checkpoint file.
   void restart(
     amrex::Amr& papa, std::istream& is, bool bReadSpecial = false) override;

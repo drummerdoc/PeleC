@@ -120,6 +120,27 @@ characteristic one.
 So corner and edge ownership works. The `apply()` algebra is dimension-agnostic
 by construction, and this says the plumbing around it is too.
 
+## AMR and EB variants
+
+`nscbc-acoustic-amr.inp` runs the planar pulse from inside a 2× refined patch
+kept away from the outflow: mean pressure and upstream residual match the
+single-level run (1013241.8 / 0.751% vs 0.752%). PeleC now warns — once per
+face — when a refined level touches a Hard/UserBC face with `bc_nscbc = 1`,
+because the fill's stencil is level-local and a fine patch on a
+characteristic face makes the boundary condition level-dependent. Measured
+here the on-face artefact is small (0.744%, +0.1 dyn/cm²); nothing
+guarantees that at higher ratios or oblique incidence.
+
+`nscbc-acoustic-eb.inp` seats an EB solid inside the fill's stencil at the
+outflow. It found two things: PeleC's *default* body state is a sampled
+fluid state the fill cannot detect (the counter read zero with a solid in
+the stencil — the silent fallback the counters exist to prevent), so
+`bc_nscbc` with EB geometry now *requires* `pelec.eb_zero_body_state = 1`
+and aborts otherwise; and a body cutting the domain face itself NaNs under
+the characteristic *and* the hard boundary — a pre-existing PeleC
+EB-at-domain-boundary limitation. With the flag set, the run counts ~56000
+body-state stencil degradations and completes cleanly.
+
 ### Two things this case turned up
 
 **The flow-reversal fallback is not hypothetical.** Running with

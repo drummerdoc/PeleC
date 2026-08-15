@@ -406,6 +406,13 @@ The quality of a characteristic boundary condition is set more by where the boun
   velocity gradient on the boundary is expensive, and a flame is the most expensive of them.
 * Do not refine an AMR level at an outflow face. The residual reflection is :math:`O(\Delta x^p)` and the
   extrapolation stencil is level-local, so a fine patch on the boundary introduces a level-dependent artefact.
+  PeleC warns once per face when a refined level touches a Hard/UserBC face with ``bc_nscbc = 1``; measured on
+  ``nscbc-acoustic-amr.inp`` the artefact is small at normal incidence, and refinement kept away from the face is
+  clean to the last digit.
+* With EB geometry, ``bc_nscbc`` **requires** ``pelec.eb_zero_body_state = 1`` (fatal otherwise): the fill detects
+  covered stencil cells by non-positive density, and PeleC's default body state is a sampled *fluid* state it cannot
+  distinguish from interior data. Keep solids clear of the domain face plane itself — a body cutting the face NaNs
+  under any boundary treatment (a pre-existing EB limitation, not an NSCBC one). See ``nscbc-acoustic-eb.inp``.
 * If a sponge or artificial-viscosity ramp is currently needed at an outflow, removing it is the acceptance test for
   the boundary condition, not something to keep for safety.
 

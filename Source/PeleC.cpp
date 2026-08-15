@@ -363,6 +363,20 @@ PeleC::read_params()
         "integrated over grown tileboxes, which would advance chemistry in "
         "the ghost cells written by the boundary condition.");
     }
+    // The characteristic fill has no EBCellFlag: it detects covered stencil
+    // cells by their non-positive density.  The DEFAULT body state is a
+    // sampled fluid state (define_body_state) -- positive density,
+    // undetectable -- so without eb_zero_body_state the fill would silently
+    // read body values as if they were interior data.  Fatal rather than
+    // silent: that is the standing rule for this boundary condition.
+    if (eb_in_domain && !eb_zero_body_state) {
+      amrex::Abort(
+        "pelec.bc_nscbc = 1 with EB geometry requires "
+        "pelec.eb_zero_body_state = 1: the characteristic fill detects "
+        "covered stencil cells by non-positive density, and the default "
+        "body state is a sampled fluid state it cannot distinguish from "
+        "interior data.");
+    }
     if (amrex::ParallelDescriptor::IOProcessor()) {
       amrex::Print()
         << "\n  NSCBC: characteristic boundary treatment ENABLED (advective "
@@ -1253,12 +1267,21 @@ PeleC::post_regrid(int lbase, int /*new_finest*/)
   if ((do_react) && (use_typical_vals_chem)) {
     set_typical_values_chem();
   }
+
+  nscbc_check_fine_faces();
 }
 
 void
 PeleC::post_init(amrex::Real /*stop_time*/)
 {
   BL_PROFILE("PeleC::post_init()");
+
+  if (level == 0) {
+    const int finest = parent->finestLevel();
+    for (int lev = 1; lev <= finest; ++lev) {
+      getLevel(lev).nscbc_check_fine_faces();
+    }
+  }
 
   amrex::Real dtlev = parent->dtLevel(level);
   amrex::Real cumtime = parent->cumTime();
