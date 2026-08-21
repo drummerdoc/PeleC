@@ -287,13 +287,16 @@ instead — T is extrapolated on the same minmod slope as everything else and ρ
 follows from the EOS — so the face gradient is the interior one, exactly. A
 uniform state still comes back to 2×10⁻¹⁶, so nothing hyperbolic is given up.
 
-Measured here, at t = 2.4×10⁻⁵ s, mean Δp against the shielded reference:
+Its measured effect is in the main matrix above: at β_s = 1 it buys 14% at
+σ = 1 (2062 → 1773) and trades mean for near-boundary structure at σ = 16
+(+49 → −139 mean, but L2(dT) in the boundary layer 4.6 → 2.7); combined with
+the corrected β_s = 0 it is half of the closure pair that removes the
+σ-dependence outright. (An earlier version of this section quoted −69% at
+σ = 16 from β_s = 0 rows measured under the inverted source sign; those
+numbers are in the git history and were measurements of the bug.)
 
-| outflow | entropy closure | temperature closure | change |
-|---|---|---|---|
-| σ = 1, β = 0.5, β_s = 0 | +2074 | +1894 | −9% |
-| σ = 16, β = 0.5, β_s = 0 | +218 | **+67** | **−69%** |
-| hard `p = p_amb` | −527 | — | — |
+The default is off, because it changes every outflow result. Turn it on when a
+thermal or compositional structure is anywhere near the boundary.
 
 ## The material continuation (`bc_nscbc_extrap_material`), and what it settles
 
@@ -354,64 +357,66 @@ at U − S_L ≈ 889 cm/s with its wrinkle frozen; the decay times are 100× the
 window), and after the exit the exact solution is known outright: a uniform
 fresh stream at (U, p_amb, T_in). `exit_metrics.py` tracks both.
 
-| outflow | transit: peak mean Δp | front | wrinkle | post-exit residual Δp, rms(u−U) |
+All characteristic rows below: β = 0.5, order 2, `extrap_temperature = 1`
+unless marked bare, `extrap_material = 0` (its transit behaviour is settled
+below and did not change). Re-measured after the Phase-0 sign fix; the old
+table's characteristic rows all carried `beta_s = 0` under the inverted sign —
+a doubled reaction source — and are superseded. The two controls reproduce:
+hard was (−200, +1.2, 0.01) and reads (−147/−203, +1.2, 0.01); σ = 16 + eT
+ends at +8.5, 0.19 against +8.5, 0.20 before.
+
+| outflow | transit peak Δp | post-exit extreme | front | post-exit residual Δp, rms(u−U) |
 |---|---|---|---|---|
-| hard `p = p_amb` | −200 | on schedule | held | **+1.2, 0.01** |
-| **σ = 16 + extrap_T** | +1800 | on schedule | held | **+8.5, 0.20** |
-| σ = 16 + extrap_T + extrap_material | −3520 | on schedule | held | +8.5, 0.20 |
-| σ = 0.25 (the shipped default) | +37000 → **NaN, crash** | pushed *backwards* | grows 40% | — |
-| σ = 0.25 + extrap_T + extrap_material | **−340000**, flame quenched | expelled | destroyed | recovering on τ = 1/K |
-| `pin_farfield` + extrap_T | +12000, persistent | 40% slow | distorted | +17500, 460 |
+| hard `p = p_amb` | −147 | −203 | on schedule | **+1.2, 0.01** |
+| σ = 16, β_s = 1 | +850 | +515 | on schedule | **+8.5, 0.19** |
+| **σ = 16, β_s = 0** | **−114** | −433 | on schedule | +8.6, 0.19 |
+| σ = 1, β_s = 1 | +9131 | +15827 | slightly late | +133, 3.5 |
+| σ = 1, β_s = 0 | −1255 | −4716 | on schedule | +133, 3.5 |
+| σ = 0.25, β_s = 1 | +24712 | +40082, climbing | **BLOCKED: stalls, pushed back** | never exits |
+| σ = 0.25, β_s = 0 | +2461 | −8864, recovering | on schedule | −253, 6.7 |
+| σ = 0.25 bare (eT = 0), β_s = 1 | +36582 | — | pushed backwards | **NaN at t = 1.9×10⁻⁴** |
+| σ = 0.25 bare (eT = 0), β_s = 0 | +34527 | — | exits, slow, wrinkle destroyed | **NaN at t = 4.1×10⁻⁴** |
 
-What the table says, in order of importance.
+Wrinkle amplitude holds at ≈ 0.034 in every completing run while the full 32
+rows track the front, decaying only as rows leave the domain, so the wrinkle
+column of the old table is subsumed by "front".
 
-**The shipped default destroys the flame and then the run.** At σ = 0.25
-the anchoring time τ = L/(σc) is comparable to the transit itself, so the
-boundary integrates the crossing's flux imbalance into a pressure ramp that
-pushes the front back upstream, pumps the wrinkle amplitude 40%, and NaNs at
-t = 2×10⁻⁴ s. This is not a tuning nuance; it is the difference between the
-run completing and not.
+What the corrected table says, in order of importance.
 
-**A fast dilatational transit wants anchoring, not transparency.** The
-crossing is not an acoustic event: what leaves is mass and enthalpy at
-M ~ 0.01, whose own pressure field is p_amb to one part in 10⁴. The hard
-Dirichlet — the *worst* acoustic boundary in this suite, R = 97% — handles
-it almost perfectly, and among characteristic treatments the quality ranking
-is exactly the anchoring-strength ranking. σ = 16 + `extrap_temperature`
-exits the flame with front kinematics and wrinkle amplitude
-indistinguishable from the hard-outflow truth, a transient of 0.18% of
-ambient, and a domain that returns to the exact uniform stream to 8 parts
-per million. The ~28% acoustic reflection that σ = 16 costs elsewhere never
-appears, because there is nothing acoustic to reflect.
+**The corrected reaction source turns the transit from a σ = 16-only
+manoeuvre into something any σ survives.** With eT = 1 and β_s = 0 the front
+crosses on schedule at every σ measured, and the transit disturbance falls
+7–10× against β_s = 1 at the same σ (+9131 → −1255 at σ = 1; +24712 → +2461
+at σ = 0.25). At σ = 16 the characteristic boundary is now *quieter during
+the crossing than the hard Dirichlet* (−114 against −147). The physics: while
+the reaction zone is in the boundary cells the crossing is a dilatational
+event the relaxation has no model for; β_s = 0 hands the incoming wave the
+exact chemical dp/dt, so the boundary passes the expansion instead of
+integrating it into the ramp that used to push the front back.
 
-**`extrap_material` is for fronts that stay, not fronts that leave.** At
-σ = 0.25 the continuation turns the crossing into a runaway: the entropy
-bound is wide open while the front is in the boundary cells, the continued
-slopes over-vent the domain, the weak relaxation cannot answer, and the
-domain drains to −0.34 atm — cold enough to quench the flame before it
-finishes leaving. At σ = 16 the same mechanism is bounded (the transit dip
-doubles relative to extrap_T alone, and the run is otherwise clean), so a
-strong σ makes the flag safe but not helpful here. Its measured value is the
-quasi-frozen table above.
+**The blocked state is what the old crash looks like with the closures half
+on.** σ = 0.25 with eT = 1 but β_s = 1 no longer NaNs — the temperature
+closure keeps the diffusive fluxes sane — but the ramp still builds to +0.04
+atm, stalls the front near x = 0.55 and pushes it back upstream; at t = 6×10⁻⁴
+the flame is still in the domain and the ramp is still climbing. Survival of
+the *run* is not survival of the *physics*.
 
-**`pin_farfield` anchors a through-flow duct to the wrong state.** It is
-stable, but it holds p + ρcu rather than p, so the whole operating point
-shifts: the stream runs 460 cm/s slow, the front crosses 40% late, and the
-domain settles +17500 dyn/cm² off ambient and stays there. Use it for the
-quiescent-reservoir case it was built for, not for an exit with a mean flow.
+**The bare default still destroys the run, with either β_s.** Term off it is
+the old crash (+37000, front pushed backwards, NaN at 1.9×10⁻⁴). With the
+corrected source it gets further — the front actually exits, slowly, wrinkle
+destroyed — and then the emptied domain NaNs at 4.1×10⁻⁴ anyway: without the
+temperature closure the boundary's diffusive fluxes are wrong through the
+whole transit and the σ = 0.25 relaxation cannot pay that debt back. eT is
+the survival flag; β_s is the fidelity flag.
 
-The two rows say something worth reading carefully. At σ = 1 the ghost-pressure
-bias of the previous section still dominates, so removing the diffusive error
-buys only 9%. At σ = 16 that bias is largely suppressed, the diffusive error is
-most of what remains, and removing it takes the error down by more than a factor
-of three.
+**Post-exit anchoring is σ's job alone.** After the flame leaves, β_s has
+nothing to act on and both β_s rows land on identical residuals (+133 at
+σ = 1, +8.5 at σ = 16, −253 recovering at σ = 0.25): the emptied domain
+returns to ambient at the relaxation rate, so the residual ranking is the
+anchoring ranking, exactly as before.
 
-**σ = 16 with the temperature closure is the first setting in this case that
-beats a hard pressure outflow on anchoring** — 67 against 527, a factor of eight
-— while remaining a characteristic boundary. The reflection cost of σ = 16 is
-unchanged at ~28%, so the trade-off of the previous section has not gone away;
-what has changed is that the anchoring side of it is now genuinely good rather
-than merely less bad.
-
-The default is off, because it changes every outflow result. Turn it on when a
-thermal or compositional structure is anywhere near the boundary.
+**`pin_farfield` and `extrap_material` conclusions are unchanged** — neither
+knob changed in Phase 0. `pin_farfield` anchors a through-flow duct to
+p + ρcu (stream 460 cm/s slow, +17500 persistent); `extrap_material` remains
+for fronts that stay, not fronts that leave. The old rows are in the git
+history.

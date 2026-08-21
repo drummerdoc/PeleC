@@ -271,7 +271,10 @@ struct Params
   // extrap_temperature it holds the error at the hard-outflow level at every
   // sigma measured (-507/-522/-511 at sigma = 0.25/1/16).  At sigma = 16 with
   // beta_s = 1 already near the mark, adding it overshoots (+49 -> -281):
-  // do not stack full relaxation and the full source.
+  // do not stack full relaxation and the full source.  On a TRANSIT (the
+  // flame-exit test) beta_s = 0 with extrap_temperature cuts the crossing
+  // disturbance 7-10x at every sigma and is what lets sigma < 16 survive the
+  // crossing at all; post-exit residuals are sigma's alone.
   //
   // Note that this is NOT obtainable from PeleC's srcq(QPRES): that expression
   // (Hydro.H) is built only from the density and internal-energy sources, and
