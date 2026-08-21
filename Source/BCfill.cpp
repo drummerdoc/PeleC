@@ -1,6 +1,10 @@
+#include <limits>
+
 #include <AMReX_FArrayBox.H>
 #include <AMReX_Geometry.H>
+#include <AMReX_MultiFab.H>
 #include <AMReX_PhysBCFunct.H>
+#include <AMReX_Reduce.H>
 
 #include "PeleC.H"
 #include "prob.H"
@@ -65,10 +69,12 @@ struct PCHypFillExtDir
   //  Corner ownership.  A ghost cell may lie outside the domain in more than
   //  one direction.  Such a cell is owned by the LOWEST idir in which it is
   //  outside on an ext_dir face whose problem hook returns a live target;
-  //  the state is written exactly once.  Combined with the clamped stencil
-  //  below this makes the fill a pure function of valid interior data, hence
-  //  independent of the order in which ghost cells are visited and identical
-  //  on CPU and GPU.
+  //  the state is written exactly once.  Combined with the stencil bounds
+  //  below -- clamped into the domain in a wall-type tangential direction,
+  //  carried through the already-written periodic images in a periodic one --
+  //  this makes the fill a pure function of data written before this launch,
+  //  hence independent of the order in which ghost cells are visited and
+  //  identical on CPU and GPU.
   //
   //  (Note that the legacy bcnormal() path further down does NOT have this
   //  property: at a corner it reads dest() at a tangential index that is
@@ -105,18 +111,45 @@ struct PCHypFillExtDir
       const int N_pos = (sgn > 0) ? domlo[idir] : domhi[idir];
       const int layer = sgn * (N_pos - iv[idir]); // 1 = nearest the domain
 
-      // Stencil base: tangential components clamped into the domain AND into
-      // this FAB, so that only valid interior cells are ever read.
       const amrex::Dim3 lo3 = amrex::lbound(dest);
       const amrex::Dim3 hi3 = amrex::ubound(dest);
       const int fab_lo[3] = {lo3.x, lo3.y, lo3.z};
       const int fab_hi[3] = {hi3.x, hi3.y, hi3.z};
+
+      // Tangential index bounds for every stencil below.
+      //
+      // In a WALL-type tangential direction the index is clamped into the
+      // domain, so that only valid interior cells are ever read.  In a
+      // PERIODIC one that clamp is exactly wrong: the corner ghost at
+      // (i < domlo, j > domhi) is the image of the one at (i < domlo,
+      // j - n_j) and must be built from row j - n_j, not from row domhi.
+      //
+      // Reading the un-clamped index gets that row, and is safe.  AMReX has
+      // already written the periodic images into dest -- FillPatchSingleLevel
+      // does its periodic ParallelCopy before calling the physical-BC functor
+      // -- and the cells this reads are inside the domain in idir and outside
+      // it only in periodic directions, which is precisely the set that
+      // GpuBndryFuncFab never launches over (its per-face launches are each
+      // guarded by !isPeriodic).  So nothing in this launch writes them, and
+      // the fill stays a pure function of data written before it, hence
+      // order-independent and identical on CPU and GPU.  The FAB bound is
+      // what keeps the read in range.
+      auto tang_bounds = [&](const int d, int& tlo, int& thi) {
+        if (geom.isPeriodic(d) != 0) {
+          tlo = fab_lo[d];
+          thi = fab_hi[d];
+        } else {
+          tlo = amrex::max<int>(domlo[d], fab_lo[d]);
+          thi = amrex::min<int>(domhi[d], fab_hi[d]);
+        }
+      };
+
       amrex::IntVect base(AMREX_D_DECL(iv[0], iv[1], iv[2]));
       for (int d = 0; d < AMREX_SPACEDIM; ++d) {
         if (d != idir) {
-          base[d] = amrex::min<int>(
-            amrex::max<int>(iv[d], amrex::max<int>(domlo[d], fab_lo[d])),
-            amrex::min<int>(domhi[d], fab_hi[d]));
+          int tlo = 0, thi = 0;
+          tang_bounds(d, tlo, thi);
+          base[d] = amrex::min<int>(amrex::max<int>(iv[d], tlo), thi);
         }
       }
 
@@ -149,9 +182,20 @@ struct PCHypFillExtDir
       // boundary plane, not the ghost cell centre: the target is a property
       // of the boundary point and must not vary with the ghost layer, or the
       // relaxation would be applied to a different target in each layer.
+      //
+      // In a periodic tangential direction the point is the WRAPPED one: the
+      // boundary point of a corner ghost is the boundary point of its image,
+      // or the fill would not be periodic even with a periodic stencil, and
+      // the problem hook would be asked about a location outside its domain.
+      // Inside the domain the wrap is the identity, so no existing query moves.
       amrex::Real x[AMREX_SPACEDIM];
       for (int d = 0; d < AMREX_SPACEDIM; ++d) {
-        x[d] = prob_lo[d] + (static_cast<amrex::Real>(base[d]) + 0.5) * dx[d];
+        int j = base[d];
+        if ((d != idir) && (geom.isPeriodic(d) != 0)) {
+          const int n_d = domhi[d] - domlo[d] + 1;
+          j = domlo[d] + (((j - domlo[d]) % n_d) + n_d) % n_d;
+        }
+        x[d] = prob_lo[d] + (static_cast<amrex::Real>(j) + 0.5) * dx[d];
       }
       x[idir] = prob_lo[idir] + static_cast<amrex::Real>(
                                   (sgn > 0) ? domlo[idir] : (domhi[idir] + 1)) *
@@ -163,12 +207,14 @@ struct PCHypFillExtDir
         continue; // this face is not characteristic here; try the next
       }
 
-      // Tangential neighbours of the boundary cell, for the transverse terms.
-      // Indices are clamped into the domain AND into this FAB, so only
-      // interior cells are read; at a corner the clamp collapses the stencil
-      // and inv_dt falls to a one-sided spacing, or to zero if both
-      // neighbours land on the same cell.  Nothing here reads a ghost cell,
-      // so the fill remains order-independent.
+      // Tangential neighbours of the boundary cell, for the transverse terms,
+      // indexed by tang_bounds above: clamped into the domain in a wall-type
+      // direction, wrapped through the periodic images in a periodic one.  At
+      // a wall corner the clamp collapses the stencil and inv_dt falls to a
+      // one-sided spacing, or to zero if both neighbours land on the same
+      // cell; in a periodic direction that never happens, and the centred
+      // difference the transverse terms want is available all the way into
+      // the corner.
       pc_nscbc::Transverse tr;
       amrex::Real s_tm[AMREX_SPACEDIM][NVAR], s_tp[AMREX_SPACEDIM][NVAR];
       if (m_nscbc_prm[idir].beta < 1.0) {
@@ -176,10 +222,10 @@ struct PCHypFillExtDir
           if (d == idir) {
             continue;
           }
-          const int dlo = amrex::max<int>(domlo[d], fab_lo[d]);
-          const int dhi = amrex::min<int>(domhi[d], fab_hi[d]);
-          const int jm = amrex::max<int>(ivN[d] - 1, dlo);
-          const int jp = amrex::min<int>(ivN[d] + 1, dhi);
+          int tlo = 0, thi = 0;
+          tang_bounds(d, tlo, thi);
+          const int jm = amrex::max<int>(ivN[d] - 1, tlo);
+          const int jp = amrex::min<int>(ivN[d] + 1, thi);
           if (jp == jm) {
             continue;
           }
@@ -486,6 +532,197 @@ PeleC::nscbc_check_fine_faces() const
           << "  condition level-dependent.  Keep refinement away from "
              "characteristic faces (see the BCs chapter).\n"
           << "  (This warning is printed once per face.)\n\n";
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Periodic-wrap gate.
+//
+//  The characteristic fill builds each ghost cell from a tangential stencil.
+//  In a periodic tangential direction that stencil has to wrap, and until
+//  Phase 0 it clamped into the domain instead.  Nothing on the branch could
+//  see it: every 2-D regression case but the circular pulse is periodic in the
+//  direction tangential to its NSCBC faces, so every 2-D baseline contained
+//  it, and a control whose state is uniform along the boundary satisfies the
+//  broken fill exactly as well as the fixed one.
+//
+//  The identity that catches it needs no reference solution.  If the fill is
+//  periodic in d, a ghost cell and its image n_d cells away were built from
+//  bitwise-identical data by identical arithmetic and must agree to the last
+//  bit.  Under the clamp they do not: every ghost above the domain is built
+//  from row domhi, and its image from row j - n_d.
+//
+//  Reported rather than merely asserted.  A pass means nothing if the state
+//  did not vary along the boundary, so the tangential spread of the boundary
+//  row -- real data, independent of the fill -- is printed beside the
+//  mismatch, and a decomposition that put no image pair in one FAB says so
+//  instead of claiming a clean result.
+// ---------------------------------------------------------------------------
+void
+PeleC::nscbc_check_periodic_wrap()
+{
+  if (!bc_nscbc || (level != 0)) {
+    return;
+  }
+  static bool done = false;
+  if (done) {
+    return;
+  }
+
+  const amrex::Box& dom = geom.Domain();
+  auto characteristic = [&](const int dir, const int side) {
+    const int t = (side == 0) ? phys_bc.lo(dir) : phys_bc.hi(dir);
+    return (t == PCPhysBCType::inflow) || (t == PCPhysBCType::user_bc);
+  };
+
+  bool relevant = false;
+  for (int idir = 0; idir < AMREX_SPACEDIM; ++idir) {
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+      relevant =
+        relevant || ((characteristic(idir, 0) || characteristic(idir, 1)) &&
+                     (d != idir) && (geom.isPeriodic(d) != 0));
+    }
+  }
+  if (!relevant) {
+    return;
+  }
+  done = true;
+
+  const int ng = numGrow();
+  amrex::MultiFab S(grids, dmap, NVAR, ng, amrex::MFInfo(), Factory());
+  FillPatch(
+    *this, S, ng, state[State_Type].curTime(), State_Type, 0, NVAR);
+
+  const amrex::Real big = std::numeric_limits<amrex::Real>::max();
+
+  for (int idir = 0; idir < AMREX_SPACEDIM; ++idir) {
+    for (int side = 0; side < 2; ++side) {
+      if (!characteristic(idir, side)) {
+        continue;
+      }
+      const int N_pos = (side == 0) ? dom.smallEnd(idir) : dom.bigEnd(idir);
+
+      for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        if ((d == idir) || (geom.isPeriodic(d) == 0)) {
+          continue;
+        }
+        const int n_d = dom.length(d);
+        if (n_d < ng) {
+          continue; // the image slab would fold over itself
+        }
+
+        // The ghost cells of this face that sit above the domain in d.  The
+        // image of each is n_d cells below, and is a ghost of this face too.
+        amrex::Box reg = amrex::grow(dom, ng);
+        if (side == 0) {
+          reg.setBig(idir, dom.smallEnd(idir) - 1);
+        } else {
+          reg.setSmall(idir, dom.bigEnd(idir) + 1);
+        }
+        reg.setSmall(d, dom.bigEnd(d) + 1);
+        reg.setBig(d, dom.bigEnd(d) + ng);
+
+        const amrex::IntVect img = -n_d * amrex::IntVect::TheDimensionVector(d);
+
+        amrex::ReduceOps<
+          amrex::ReduceOpMax, amrex::ReduceOpSum, amrex::ReduceOpMax,
+          amrex::ReduceOpMin>
+          op;
+        amrex::ReduceData<amrex::Real, amrex::Long, amrex::Real, amrex::Real>
+          rd(op);
+        using RT = typename decltype(rd)::Type;
+
+        for (amrex::MFIter mfi(S); mfi.isValid(); ++mfi) {
+          auto const& a = S.const_array(mfi);
+          const amrex::Box& fbx = mfi.fabbox();
+
+          // The image pairs this FAB holds both halves of.
+          amrex::Box sh(fbx);
+          sh.shift(-img);
+          const amrex::Box pbx = fbx & reg & sh;
+          if (!pbx.isEmpty()) {
+            op.eval(
+              pbx, rd, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> RT {
+                const amrex::IntVect iv(AMREX_D_DECL(i, j, k));
+                const amrex::IntVect iw = iv + img;
+                amrex::Real e = 0.0;
+                for (int n = 0; n < NVAR; n++) {
+                  const amrex::Real u = a(iv, n);
+                  const amrex::Real v = a(iw, n);
+                  const amrex::Real s = amrex::max<amrex::Real>(
+                    amrex::Math::abs(u), amrex::max<amrex::Real>(amrex::Math::abs(v), 1.0e-300));
+                  e = amrex::max<amrex::Real>(e, amrex::Math::abs(u - v) / s);
+                }
+                return {e, amrex::Long(1), -big, big};
+              });
+          }
+
+          // The tangential structure of the boundary row itself: valid data,
+          // so this measures whether the check above could have failed.
+          amrex::Box row = dom;
+          row.setSmall(idir, N_pos);
+          row.setBig(idir, N_pos);
+          row &= mfi.validbox();
+          if (!row.isEmpty()) {
+            op.eval(
+              row, rd, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> RT {
+                const amrex::Real r = a(i, j, k, URHO);
+                return {0.0, amrex::Long(0), r, r};
+              });
+          }
+        }
+
+        auto hv = rd.value(op);
+        amrex::Real worst = amrex::get<0>(hv);
+        amrex::Long npairs = amrex::get<1>(hv);
+        amrex::Real rmax = amrex::get<2>(hv);
+        amrex::Real rmin = amrex::get<3>(hv);
+        amrex::ParallelDescriptor::ReduceRealMax(worst);
+        amrex::ParallelDescriptor::ReduceLongSum(npairs);
+        amrex::ParallelDescriptor::ReduceRealMax(rmax);
+        amrex::ParallelDescriptor::ReduceRealMin(rmin);
+        const amrex::Real spread =
+          (rmax > -big) ? (rmax - rmin) / amrex::max<amrex::Real>(
+                                            amrex::Math::abs(rmax), 1.0e-300)
+                        : 0.0;
+
+        // Bitwise agreement is what the identity asserts; the tolerance is
+        // there only so that a future reordering of the arithmetic does not
+        // turn a correct fill into an abort.
+        constexpr amrex::Real tol = 1.0e-13;
+        if (worst > tol) {
+          amrex::Abort(
+            "NSCBC periodic-wrap check FAILED on direction " +
+            std::to_string(idir) + " " + (side == 0 ? "lo" : "hi") +
+            " with periodic tangential direction " + std::to_string(d) +
+            ": worst relative mismatch " + std::to_string(worst) + " over " +
+            std::to_string(npairs) +
+            " image pairs.  The characteristic fill is not periodic where the "
+            "domain is.");
+        }
+        if (amrex::ParallelDescriptor::IOProcessor() && (verbose > 0)) {
+          amrex::Print()
+            << "  NSCBC periodic-wrap check: dir " << idir
+            << (side == 0 ? " lo" : " hi") << ", periodic tangential dir " << d
+            << " -- ";
+          if (npairs == 0) {
+            amrex::Print()
+              << "NOT CHECKED: no box holds a ghost cell and its image "
+                 "together.  Raise amr.max_grid_size in direction "
+              << d << " to span the domain if you want this gated.\n";
+          } else {
+            amrex::Print()
+              << npairs << " image pairs agree to " << worst
+              << " (boundary-row density spread " << spread << ")\n";
+            if (spread == 0.0) {
+              amrex::Print()
+                << "    (that row is uniform along the boundary, so this pass "
+                   "is vacuous -- a clamped stencil would pass it too.)\n";
+            }
+          }
+        }
       }
     }
   }

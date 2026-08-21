@@ -9,7 +9,26 @@ not a wave at all.
 ./PeleC-NSCBC-COVO nscbc-covo.inp        # probtype 0, convected vortex
 ./PeleC-NSCBC-COVO nscbc-pulse2d.inp     # probtype 1, circular pulse
 # add pelec.bc_nscbc=0 to either for the hard-boundary reference
+./PeleC-NSCBC-COVO nscbc-wrapgate.inp    # the periodic-wrap gate; zero steps
 ```
+
+A third input file lives here that is not a physics run. `nscbc-wrapgate.inp`
+takes zero steps and exists only to give `PeleC::nscbc_check_periodic_wrap()`
+a configuration it can discriminate on: a box spanning the periodic direction,
+structure sitting on the periodic seam, and `bc_nscbc_beta < 1` so the
+transverse stencil is assembled too. Expect a line like
+
+```
+  NSCBC periodic-wrap check: dir 0 lo, periodic tangential dir 1 -- N image
+  pairs agree to 0 (boundary-row density spread S)
+```
+
+with a mismatch of exactly zero and a spread that is *not* zero. A non-zero
+mismatch aborts. A zero spread means the check passed vacuously and gated
+nothing, which is what `nscbc-covo.inp` and `nscbc-acoustic.inp` do: their
+states are uniform along the periodic direction near the seam, which is
+precisely why the clamped-stencil defect survived on this branch until Phase 0.
+The file's own header comment explains each choice.
 
 ---
 
