@@ -28,8 +28,12 @@ Owner: Marc. Repo at `/Users/marcusd/src/PeleC`, fork `origin` = drummerdoc/Pele
 - `Source/NSCBC.H:1029`: reaction source must be `L_in += (1-beta_s)*S_p`, not `-=`.
   Verified convention-free in `Verification/NSCBC1D/source_sign_check.py`. After the flip, re-measure
   C12, the FlameOutflow/flame-exit tables and COVO before trusting any old number.
-- `Source/BCfill.cpp:115-121, 179-182`: tangential stencil must wrap in periodic directions
-  (use `geom.isPeriodic(d)`; the un-clamped `dest` index is valid after `FillBoundary`).
+- ~~`Source/BCfill.cpp`: tangential stencil in periodic directions~~ FIXED, but not by wrapping:
+  amrex's corner protocol (`StateDataPhysBCFunct` recomputes corner ghosts on an image-band strip
+  FAB) makes a centred difference across the periodic seam unachievable. The fill restricts its
+  tangential stencil to the strip-consistent band (`tang_range`); the gate is
+  `nscbc_check_periodic_wrap()` + `NSCBC-COVO/nscbc-wrapgate.inp` (both faces bitwise, both
+  decompositions bitwise after 20 steps). Do not "fix" this back to a wrap.
 - Scheme is NOT Motheau's NSCBC-GC (invariant extrapolation, not derivative targets) — fix the sphinx docs.
 - Daviller 2019's σ is half of this code's σ (his 2K vs our K in the wave).
 

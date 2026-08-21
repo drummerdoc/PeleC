@@ -116,31 +116,75 @@ struct PCHypFillExtDir
       const int fab_lo[3] = {lo3.x, lo3.y, lo3.z};
       const int fab_hi[3] = {hi3.x, hi3.y, hi3.z};
 
-      // Tangential index bounds for every stencil below.
+      // Tangential index bounds for the stencils below.
       //
-      // In a WALL-type tangential direction the index is clamped into the
-      // domain, so that only valid interior cells are ever read.  In a
-      // PERIODIC one that clamp is exactly wrong: the corner ghost at
-      // (i < domlo, j > domhi) is the image of the one at (i < domlo,
-      // j - n_j) and must be built from row j - n_j, not from row domhi.
+      // In a WALL-type tangential direction every index is clamped into the
+      // domain, so that only valid interior cells are ever read.
       //
-      // Reading the un-clamped index gets that row, and is safe.  AMReX has
-      // already written the periodic images into dest -- FillPatchSingleLevel
-      // does its periodic ParallelCopy before calling the physical-BC functor
-      // -- and the cells this reads are inside the domain in idir and outside
-      // it only in periodic directions, which is precisely the set that
-      // GpuBndryFuncFab never launches over (its per-face launches are each
-      // guarded by !isPeriodic).  So nothing in this launch writes them, and
-      // the fill stays a pure function of data written before it, hence
-      // order-independent and identical on CPU and GPU.  The FAB bound is
-      // what keeps the read in range.
-      auto tang_bounds = [&](const int d, int& tlo, int& thi) {
-        if (geom.isPeriodic(d) != 0) {
-          tlo = fab_lo[d];
-          thi = fab_hi[d];
-        } else {
+      // A PERIODIC tangential direction is governed by a protocol this fill
+      // does not own.  amrex's StateDataPhysBCFunct fills a box that hangs
+      // out of the domain in a periodic direction in two passes: the functor
+      // runs on the full FAB, and then, per periodic direction, the corner
+      // ghosts (outside in the normal AND the periodic direction) are
+      // RECOMPUTED on a temporary strip FAB holding only their image rows --
+      // the first `ng` rows inside the seam -- and copied back over whatever
+      // the first pass wrote.  Two consequences:
+      //
+      //   * The corner ghosts ARE built from image-row data, which is what
+      //     periodicity wants; nothing here needs to (or can) arrange that.
+      //   * The fill of a boundary cell within `ng` rows of a periodic seam
+      //     happens TWICE, once on the full FAB and once on the strip, and
+      //     the final array is periodic only if both passes compute the same
+      //     value.  The strip cannot see past its own rows, so the shared
+      //     stencil is the BAND of `ng` rows inside the seam: one-sided at
+      //     the seam row and at the band's inner edge, centred in between.
+      //     A centred difference ACROSS the seam is unachievable -- the row
+      //     beyond the seam does not exist in the strip -- and either
+      //     clamping at the domain edge (the pre-Phase-0 behaviour) or
+      //     wrapping through the FAB's resident images (the obvious fix)
+      //     disagrees with the strip and leaves the filled array aperiodic.
+      //     The wrap gate (nscbc_check_periodic_wrap) measures exactly this.
+      //
+      // The band height is the fill's ghost width, read off this FAB as its
+      // overhang in the NORMAL direction on the side being filled.  That and
+      // not the tangential overhang, for a decomposition reason: a box that
+      // does not touch the seam has no tangential overhang at all, yet its
+      // seam-adjacent cells must still compute the band-restricted stencil,
+      // or the same physical cell would be centred in one decomposition and
+      // one-sided in another.  The normal overhang is the mf's ghost width on
+      // every FAB alike -- amrex's corner strip included, which is grown in
+      // the normal direction even though it is only the band tall in the
+      // periodic one -- so it is the decomposition-invariant choice.
+      //
+      // Band membership is decided on the WRAPPED index and the band is then
+      // shifted back, so a ghost outside the domain in the periodic direction
+      // (dead in 2-D, where the strip overwrites it, but live at a 3-D edge,
+      // which no strip revisits) reads the image rows of the band its wrapped
+      // image reads, and the two agree to the bit.  A ghost region wider than
+      // the period has no consistent band; the stencil then degrades to the
+      // FAB clamp, as it must.
+      const int ng_fill = (sgn > 0) ? (domlo[idir] - fab_lo[idir])
+                                    : (fab_hi[idir] - domhi[idir]);
+      auto tang_range = [&](const int d, const int j0, int& tlo, int& thi) {
+        if (geom.isPeriodic(d) == 0) {
           tlo = amrex::max<int>(domlo[d], fab_lo[d]);
           thi = amrex::min<int>(domhi[d], fab_hi[d]);
+          return;
+        }
+        tlo = fab_lo[d];
+        thi = fab_hi[d];
+        const int n_d = domhi[d] - domlo[d] + 1;
+        if (ng_fill >= n_d) {
+          return;
+        }
+        const int jw = domlo[d] + (((j0 - domlo[d]) % n_d) + n_d) % n_d;
+        const int shift = j0 - jw;
+        if (jw <= domlo[d] + ng_fill - 1) {
+          tlo = amrex::max<int>(tlo, domlo[d] + shift);
+          thi = amrex::min<int>(thi, domlo[d] + ng_fill - 1 + shift);
+        } else if (jw >= domhi[d] - ng_fill + 1) {
+          tlo = amrex::max<int>(tlo, domhi[d] - ng_fill + 1 + shift);
+          thi = amrex::min<int>(thi, domhi[d] + shift);
         }
       };
 
@@ -148,7 +192,7 @@ struct PCHypFillExtDir
       for (int d = 0; d < AMREX_SPACEDIM; ++d) {
         if (d != idir) {
           int tlo = 0, thi = 0;
-          tang_bounds(d, tlo, thi);
+          tang_range(d, iv[d], tlo, thi);
           base[d] = amrex::min<int>(amrex::max<int>(iv[d], tlo), thi);
         }
       }
@@ -208,13 +252,12 @@ struct PCHypFillExtDir
       }
 
       // Tangential neighbours of the boundary cell, for the transverse terms,
-      // indexed by tang_bounds above: clamped into the domain in a wall-type
-      // direction, wrapped through the periodic images in a periodic one.  At
-      // a wall corner the clamp collapses the stencil and inv_dt falls to a
-      // one-sided spacing, or to zero if both neighbours land on the same
-      // cell; in a periodic direction that never happens, and the centred
-      // difference the transverse terms want is available all the way into
-      // the corner.
+      // bounded by tang_range above: clamped into the domain in a wall-type
+      // direction, restricted to the strip-consistent band in a periodic one.
+      // At a wall corner the clamp collapses the stencil and inv_dt falls to
+      // a one-sided spacing, or to zero if both neighbours land on the same
+      // cell; near a periodic seam the difference is one-sided at the band's
+      // two edge rows and centred everywhere else.
       pc_nscbc::Transverse tr;
       amrex::Real s_tm[AMREX_SPACEDIM][NVAR], s_tp[AMREX_SPACEDIM][NVAR];
       if (m_nscbc_prm[idir].beta < 1.0) {
@@ -223,7 +266,7 @@ struct PCHypFillExtDir
             continue;
           }
           int tlo = 0, thi = 0;
-          tang_bounds(d, tlo, thi);
+          tang_range(d, ivN[d], tlo, thi);
           const int jm = amrex::max<int>(ivN[d] - 1, tlo);
           const int jp = amrex::min<int>(ivN[d] + 1, thi);
           if (jp == jm) {

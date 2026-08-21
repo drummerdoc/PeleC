@@ -27,8 +27,12 @@ with a mismatch of exactly zero and a spread that is *not* zero. A non-zero
 mismatch aborts. A zero spread means the check passed vacuously and gated
 nothing, which is what `nscbc-covo.inp` and `nscbc-acoustic.inp` do: their
 states are uniform along the periodic direction near the seam, which is
-precisely why the clamped-stencil defect survived on this branch until Phase 0.
-The file's own header comment explains each choice.
+precisely why the seam inconsistency survived on this branch until Phase 0.
+The shipped file gates the inflow face; a second run with
+`prob.centre = 1.0 0.0` puts the vortex on the outflow corner and gates that
+face. The file's own header comment explains each choice, and the comment
+above `tang_range` in `Source/BCfill.cpp` explains the band-restricted
+stencil that makes the identity hold under amrex's corner-strip protocol.
 
 ---
 
