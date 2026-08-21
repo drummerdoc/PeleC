@@ -224,7 +224,7 @@ struct Params
 
   // Weight on the REACTION source term in the modelled incoming acoustic,
   // with the same convention as beta:
-  //     L_in = K (phi - phi_target) - (1 - beta) T - (1 - beta_s) S_reaction
+  //     L_in = K (phi - phi_target) - (1 - beta) T + (1 - beta_s) S_reaction
   //   1  discard it -- the default, and the only correct choice when the
   //      boundary is far enough from the flame that heat release there is
   //      negligible
@@ -234,6 +234,38 @@ struct Params
   // boundary cell at a rate the 1-D relaxation has no model for, so sigma has
   // to absorb it and the mean pressure sits off target.  S_reaction supplies
   // the missing dp/dt.
+  //
+  // Why the sign is PLUS, in this kernel's own outward frame.  The LODI
+  // pressure and normal-velocity equations with transverse and chemical
+  // sources are
+  //     dp/dt = -(L5 + L1)/2 - T_p + S_p
+  //     du/dt = -(L5 - L1)/(2 rho c) - T_u
+  // and the incoming invariant this fill actually writes is R- = u - p/(rho c),
+  // so
+  //     dR-/dt = (1/rho c) [ L1 + (T_p - rho c T_u) - S_p ]
+  //            = (1/rho c) [ L1 + T_in - S_p ] ,
+  // with T_in exactly the quantity assembled in transverse_terms() below.  A
+  // perfectly non-reflecting boundary wants dR-/dt = 0, i.e. L1 = -T_in + S_p:
+  // the transverse term enters with a minus and the source with a PLUS.  The
+  // asymmetry is not a convention; it is that T_in was defined with the sign it
+  // carries in dR-/dt and S_p with the sign it carries in dp/dt.
+  //
+  // Convention-free confirmation, from the exact steady state rather than from
+  // anyone's L-definitions.  Heat release at constant pressure produces the
+  // dilatation du/dn = S_p/(rho c^2), so the exact R- gradient at a steady
+  // flame is +S_p/(rho c^2); this fill imposes dR-/dn = L_in/(rho c^2) for
+  // u << c, so it reproduces the exact state at p = p_target only with +S_p.
+  // Verification/NSCBC1D/source_sign_check.py transcribes this fill into a 1-D
+  // linear-acoustics model whose steady state is known and reports the
+  // equilibrium offset (p_N - p_t) K / S_p for the three signs.
+  //
+  // This term was subtracted until Phase 0, which means beta_s = 0 DOUBLED the
+  // heat-release push on R- instead of cancelling it -- offset 2 S_p/K, worse
+  // than leaving the term off.  Every beta_s = 0 number measured before that
+  // fix (PMF 65 -> 80, FlameOutflow 2065 -> 2074) is a measurement of the bug.
+  // With the sign corrected, beta_s = 0 is the Sutherland-Kennedy (JCP 2003)
+  // cancellation of the steady-flame pressure offset (1-alpha) S_p/K, and is
+  // the right choice for a flame SITTING on the boundary.
   //
   // Note that this is NOT obtainable from PeleC's srcq(QPRES): that expression
   // (Hydro.H) is built only from the density and internal-energy sources, and
@@ -1026,7 +1058,7 @@ apply(
       bool src_ok = true;
       const amrex::Real S_p = reaction_dpdt(qN, src_ok);
       if (src_ok) {
-        L_in -= (1.0 - prm.beta_s) * S_p;
+        L_in += (1.0 - prm.beta_s) * S_p;
       } else {
         bump(Diag::source_drop);
       }
@@ -1044,6 +1076,12 @@ apply(
     // ghost closure (extrap_temperature, gated by C8 and C12) already
     // carries the diffusive physics, and an amplitude-side term counts it
     // twice.  See check C12 in Verification/NSCBC1D.
+    //
+    // Caveat as of Phase 0: every number quoted above was measured with the
+    // reaction source subtracted rather than added (see beta_s), so the
+    // double-count that condemned the diffusive term may have been the sign
+    // bug wearing its clothes.  C12 is re-run under the corrected sign before
+    // this decision stands or falls.
     Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dRm +
            static_cast<amrex::Real>(layer) * dx_normal * L_in /
              (lambda_in * rho_c);

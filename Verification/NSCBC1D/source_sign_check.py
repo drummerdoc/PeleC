@@ -64,8 +64,8 @@ def run(s, nsteps=60000, cfl=0.5):
     return p, u
 
 print(f"K = {K:.3g} 1/s, S_p = {Sp_N:.3g}, predicted offsets S_p/K = {Sp_N/K:.4g}")
-for s, name in [(+1, "+S_p (this note's claim)"), (0, "term off (beta_s=1)"),
-                (-1, "-S_p (NSCBC.H:1029 as written)")]:
+for s, name in [(+1, "+S_p (NSCBC.H:1029, Phase 0 onward)"), (0, "term off (beta_s=1)"),
+                (-1, "-S_p (as written before Phase 0)")]:
     p, u = run(s)
     off = p[-1] - p_t
     print(f"s={s:+d}  {name:32s}  p_N - p_t = {off:10.2f}   (p_N-p_t)K/S_p = {off*K/Sp_N:6.3f}"
