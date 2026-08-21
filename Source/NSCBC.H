@@ -265,7 +265,13 @@ struct Params
   // fix (PMF 65 -> 80, FlameOutflow 2065 -> 2074) is a measurement of the bug.
   // With the sign corrected, beta_s = 0 is the Sutherland-Kennedy (JCP 2003)
   // cancellation of the steady-flame pressure offset (1-alpha) S_p/K, and is
-  // the right choice for a flame SITTING on the boundary.
+  // the right choice for a flame SITTING on the boundary.  Re-measured on the
+  // flame-outflow case (beta = 0.5, order 2): at sigma = 1 the switch now
+  // halves the boundary error (2062 -> 1089 dyn/cm2), and combined with
+  // extrap_temperature it holds the error at the hard-outflow level at every
+  // sigma measured (-507/-522/-511 at sigma = 0.25/1/16).  At sigma = 16 with
+  // beta_s = 1 already near the mark, adding it overshoots (+49 -> -281):
+  // do not stack full relaxation and the full source.
   //
   // Note that this is NOT obtainable from PeleC's srcq(QPRES): that expression
   // (Hydro.H) is built only from the density and internal-energy sources, and

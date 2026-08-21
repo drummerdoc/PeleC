@@ -65,54 +65,75 @@ The protocol that works:
 
 Errors against the shielded reference at t = 2.4×10⁻⁵ s (≈ 3.4 τ_relax at
 σ = 1), in dyn/cm²; p_amb = 1.013×10⁶, so 1000 is 10⁻³ of ambient. `R` is the
-acoustic reflection at the same σ from `Verification/NSCBC1D`.
+acoustic reflection at the same σ from `Verification/NSCBC1D`. All
+characteristic rows: β = 0.5, order 2, hard-Dirichlet inlet. `eT` is
+`bc_nscbc_extrap_temperature`. Measured after the Phase-0 reaction-source sign
+fix (`NSCBC.H`, `L_in += (1−β_s) S_p`); the pre-fix table is in the git
+history, and the one configuration the fix does not touch reproduces it —
+σ = 1, eT = 0, β_s = 1 was +2065 before and is +2062 now, the 0.15% being the
+Phase-0 periodic-seam stencil change.
 
-| outflow | σ | β | β_s | order | mean Δp | L2(Δp) | R [%] |
+| outflow | σ | eT | β_s | mean Δp | L2(Δp) | L2(Δp) bl | R [%] |
 |---|---|---|---|---|---|---|---|
-| hard `p = p_amb` | — | — | — | — | −527 | 586 | — |
-| characteristic | 0.25 | 0.5 | 0 | 2 | +2185 | 2209 | 0.76 |
-| characteristic | 1 | 1 | 1 | 2 | +2301 | 2325 | 2.56 |
-| characteristic | 1 | 0.5 | 1 | 2 | +2065 | 2088 | 2.56 |
-| characteristic | 1 | 1 | 0 | 2 | +2260 | 2288 | 2.56 |
-| characteristic | 1 | 0.5 | 0 | 2 | +2074 | 2098 | 2.56 |
-| characteristic | 4 | 0.5 | 0 | 2 | +1450 | 1477 | 7.20 |
-| **characteristic** | **16** | **0.5** | **0** | **2** | **+218** | **330** | **28.1** |
-| characteristic | 1 | 0.5 | 0 | **1** | −2393 | 2408 | — |
-| `pin_farfield` | — | 0.5 | 0 | 2 | +748 | 787 | 0.015 |
+| hard `p = p_amb` | — | — | — | −527 | 586 | 631 | — |
+| characteristic | 0.25 | 0 | 1 | +2195 | 2217 | 2208 | 0.76 |
+| characteristic | 0.25 | 0 | 0 | +1465 | 1508 | 1724 | 0.76 |
+| characteristic | 0.25 | 1 | 1 | +2026 | 2052 | 2142 | 0.76 |
+| **characteristic** | **0.25** | **1** | **0** | **−507** | **569** | **639** | **0.76** |
+| characteristic | 1 | 0 | 1 | +2062 | 2084 | 2133 | 2.56 |
+| characteristic | 1 | 0 | 0 | +1089 | 1128 | 1224 | 2.56 |
+| characteristic | 1 | 1 | 1 | +1773 | 1801 | 1883 | 2.56 |
+| characteristic | 1 | 1 | 0 | −522 | 582 | 647 | 2.56 |
+| characteristic | 16 | 0 | 1 | +49 | 256 | 135 | 28.1 |
+| characteristic | 16 | 0 | 0 | −281 | 377 | 394 | 28.1 |
+| **characteristic** | **16** | **1** | **1** | **−139** | **286** | **270** | **28.1** |
+| characteristic | 16 | 1 | 0 | −511 | 570 | 618 | 28.1 |
 
-Five things come out of that table, and none of them is the thing this case was
-built to look for.
+(The pre-fix table also carried β = 1 rows, an order-1 row and `pin_farfield`;
+none of those knobs changed in Phase 0 and their conclusions stand: β = 0.5 is
+a free ~10%, order 2 is load-bearing, `pin_farfield` anchors to
+p_target + ρc·u_out. See the git history for the numbers.)
 
-**σ is the control that matters, and the default is far too small.** From
-σ = 0.25 to σ = 16 the error falls by a factor of ten, and only at σ = 16 does
-the characteristic outflow beat a hard pressure outflow. The default σ = 0.25,
-which `Verification/NSCBC1D` shows is a good inert choice, is the *worst* entry
-in the table.
+What the corrected table says, in order of importance.
 
-**β = 0.5 helps by about 10%, consistently.** Every pairing that differs only in
-β moves the same way and by about the same amount. That is the same β ≈ 0.5 the
-COVO case measured, arrived at independently, which is worth something.
+**β_s = 0 now earns its keep, and the old table was measuring the bug.** With
+the sign corrected, switching the reaction source on cuts the error by a third
+at σ = 0.25 (2195 → 1465) and by half at σ = 1 (2062 → 1089). Under the old
+sign the same switch did nothing (+2065 → +2074), because it was *doubling*
+the heat-release push and the visible residue was only the difference between
+2 S_p/K and the σ-dominated rest. The Sutherland–Kennedy cancellation this
+term implements was always the right physics; the branch had its sign
+inverted from the first commit to Phase 0.
 
-**β_s does essentially nothing.** 2301 → 2260 and 2065 → 2074: one improves by
-2%, the other degrades by 0.4%. This is not a silent failure — the diagnostics
-report `reaction source dropped 0` throughout — the correction is being applied
-and its effect is below the noise. See below for why.
+**extrap_temperature and β_s = 0 together erase the model error, at every σ.**
+The eT = 1, β_s = 0 rows read −507 / −522 / −511 for σ = 0.25 / 1 / 16: the
+σ-dependence that dominated every other configuration is *gone*, and the
+error lands at the hard-outflow level (−527 / 586) — but at σ = 0.25 it costs
+0.76% reflection where the hard boundary reflects everything. This is the
+consistent-closure result: extrap_temperature makes the ghosts carry the
+diffusive dp/dt and β_s = 0 makes the incoming wave carry the chemical one,
+and what remains no longer scales with the relaxation. Why the remaining
+≈ −515 coincides with the hard boundary's error to 3% at all three σ is not
+established; it smells like a shared floor, and nothing currently gates it.
 
-**`order = 2` is not a refinement, it is load-bearing.** Dropping to first order
-flips the sign and gives an error seven times larger than σ = 16. The outgoing
-invariant's extrapolation is what lets the front's structure leave; without it
-the ghost clamps the front and the domain drains.
+**σ = 16 with β_s = 1 is still the best absolute error, and β_s = 0
+overcorrects there.** +49 / 256 (eT = 0) and −139 / 286 (eT = 1) beat every
+other row's L2, at the known price of 28% reflection. Adding β_s = 0 on top
+pushes the mean through zero to −281 / −511: at high σ the relaxation is
+already absorbing most of the chemical offset, and the source term then
+pushes past the mark — the 1-D S_p accounting is not exact against this
+tilted, 2-D front.
 
-**`pin_farfield` is the interesting compromise.** It is nearly non-reflecting
-(0.015%) and still anchors to within 748 — better than σ = 4 at a fraction of
-the reflection. Its known cost is that it anchors to p_target + ρc·u_out rather
-than p_target, which is exactly the residual seen here.
+**σ is no longer the only control that matters.** In the old table only
+σ = 16 beat the hard outflow. Now σ = 0.25 with the consistent closures
+matches it while staying transparent, and the sentence "the default is the
+worst entry in the table" applies only with the closures off.
 
-## Why β_s does nothing, and what actually goes wrong
+## What the error is made of
 
-The natural reading of the table is that the reaction source correction is
-broken. It is not. Bisecting the configuration at σ = 1 (t = 10⁻⁵ s, domain-mean
-pressure rise):
+The bisection below predates the sign fix but measures configurations the fix
+does not touch (β_s never enters: chemistry off, or β_s = 1), so it stands.
+At σ = 1 (t = 10⁻⁵ s, domain-mean pressure rise):
 
 | configuration | mean Δp |
 |---|---|
@@ -122,10 +143,12 @@ pressure rise):
 | flame, reactions and diffusion | +1283 |
 | flame, hard outflow | −23 |
 
-**The error is already there with chemistry switched off.** Whatever is going
-wrong is not the reaction source term, and β_s cannot fix it because it is not
-what is being measured. Reactions roughly double an error that a purely
-non-reacting density front had already created.
+**Half the error is there with chemistry switched off.** A purely non-reacting
+density front already biases the boundary; reactions roughly double it. That
+is why β_s = 0 alone halves the σ = 1 error rather than removing it (2062 →
+1089 in the table above), and why extrap_temperature — the closure that lets
+the ghosts carry the front's diffusive structure — is the other half of the
+recipe.
 
 The mechanism is in the ghost pressure. At an outflow
 
@@ -160,7 +183,9 @@ tell the two apart.
 
 Two checks that the formula is the right one rather than a plausible story:
 
-* It predicts a σ⁻¹ trend. Measured: 2074 → 1450 → 218 for σ = 1 → 4 → 16.
+* It predicts a σ⁻¹ trend. Measured (β_s = 1, eT = 0): 2062 → 256 for
+  σ = 1 → 16, and 2074 → 1450 → 218 for σ = 1 → 4 → 16 in the pre-fix table,
+  whose β_s = 0 rows differ from β_s = 1 by under 1%.
 * It predicts the offset is **grid-converged**, because δR₊ is a per-cell slope
   falling as 1/n_x while the anchoring carries 1/n_x explicitly. Measured
   (no chemistry, σ = 1, t = 10⁻⁵ s): n_x = 48 → +531, 96 → +409, 192 → +371.
@@ -171,17 +196,17 @@ Two checks that the formula is the right one rather than a plausible story:
 This is the case that turns "place outflows away from flames" from received
 wisdom into a number. If you must put one there:
 
-* Raise σ. The inert default of 0.25 is the worst choice available. σ ≈ 10 is
-  where the anchoring starts to win, and it costs you roughly 20% acoustic
-  reflection, so you are trading one error for another and should decide which
-  one your problem cares about.
+* Turn on the consistent closures: `bc_nscbc_extrap_temperature = 1` and
+  `bc_nscbc_beta_s = 0`. Together they hold the error at the hard-outflow
+  level at ANY σ, so you can keep a transparent boundary (σ = 0.25, 0.76%
+  reflection) instead of buying anchoring with reflection.
+* If absolute pressure error matters more than transparency, σ = 16 with
+  `beta_s = 1` is still the best row (L2 ≈ 260–290) at 28% reflection. Do
+  not combine σ = 16 with β_s = 0 — the two corrections overshoot together.
 * Or use `pin_farfield`, if a fixed offset of order ρc·u_out is acceptable and
   transparency is not.
 * Set `bc_nscbc_beta = 0.5`. It is a free 10%.
 * Leave `bc_nscbc_order = 2`.
-* `bc_nscbc_beta_s` will not save you. The reaction source correction is real
-  and correctly applied, but at a front-crossing outflow it is a second-order
-  effect on top of a first-order problem.
 * Run with `pelec.sum_interval > 0` at least once and read the fallback line.
   A `reaction source dropped` or `transverse dropped` count means a dial is
   silently doing nothing.
