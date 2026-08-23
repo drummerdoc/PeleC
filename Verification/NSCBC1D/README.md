@@ -145,9 +145,24 @@ qualifications. (Here the closure is handed the manufactured source exactly;
 a PeleC version would assemble dp/dt|src from `reaction_dpdt` plus the
 diffusive term, and inherits their coverage and their gaps.)
 
-Still untested: multi-species fitting on a progress variable, a
-shape-distorted (not merely end-state-distorted) family, and the interaction
-with β_s = 0, which feeds the same S_p into the incoming wave.
+The shape axis is also measured: a second sustained-front block replaces the
+truth with a Richards curve (k = 3 — asymmetric, outside any tanh; the
+manufactured source and the oracle follow it automatically) while the fit
+still assumes tanh. At 0.7 τ / t_end: entropy 13367 / 27461, **fitU 54.9 /
+71.7**, oracle −15.0 / −21.7 — the tanh fit through a non-tanh truth retains
+**99%** of the recovery, and the source bound stays inert. The reason is
+geometric: the ghosts extend 4 cells past the boundary while the front is ~20
+cells wide, so any smooth monotone saturating family matched locally in value
+and slope agrees with the truth to second order over the overhang. The
+library's global shape barely matters; what carries the closure is (i)
+monotone saturating structure with bounded end states, (ii) the local
+value-and-slope match, refreshed statelessly, and (iii) the source gate.
+That is the design statement for a 2-D/3-D version: it does not need the PMF
+profile per se — it needs a one-parameter monotone family with measurable end
+states.
+
+Still untested: multi-species fitting on a progress variable, and the
+interaction with β_s = 0, which feeds the same S_p into the incoming wave.
 
 ## Reference results
 

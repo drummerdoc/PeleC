@@ -1948,8 +1948,21 @@ check_sustained_ramp()
   eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
   const Real mdot = rho0 * u0;
 
+  // The TRUE front shape.  0 = tanh (the family the fit closure assumes);
+  // 1 = a Richards curve with k = 3, centred so g = 1/2 at the boundary:
+  // the same end states and width scale but genuinely outside the tanh
+  // family -- e^{3 xi} approach on the fresh side, a slow e^{-xi} tail on
+  // the burnt side, the way a real flame's preheat structure is one-sided.
+  int true_shape = 0;
   auto uofx = [&](const Real x) {
-    const Real g = 0.5 * (1.0 + std::tanh((x - cs.L) / wr));
+    const Real xi = (x - cs.L) / wr;
+    Real g;
+    if (true_shape == 0) {
+      g = 0.5 * (1.0 + std::tanh(xi));
+    } else {
+      const Real x0 = 1.3475805944; // -ln(2^{1/3} - 1): g(0) = 1/2
+      g = std::pow(1.0 + std::exp(-(xi + x0)), -3.0);
+    }
     return u0 * (1.0 + (ratio - 1.0) * g);
   };
   // Total enthalpy of the exact profile at x.
@@ -2426,6 +2439,50 @@ check_sustained_ramp()
       "t_end, du/dn -> %.0f (unbounded fitU %.1f / %.1f / %.0f)",
       e1_fitB, eE_fitB, g_fitB, e1_fitU, eE_fitU, g_fitU);
     report("C11x the bound must not tax the sustained front", buf);
+  }
+
+  // ---- C11x shape distortion: the truth is not in the family -------------
+  // The fitX row above distorted the family's END STATE and the fit absorbed
+  // it; this block distorts the SHAPE.  The truth becomes the Richards front
+  // (asymmetric, outside any tanh), the manufactured source and the oracle
+  // follow it automatically, and the fit still assumes tanh.  What survives
+  // of the 97% is the measure of how much the closure leans on the library
+  // profile actually matching the flame.
+  {
+    true_shape = 1;
+    Real prd[NS], grd[NS], ptd[NS], gtd[NS];
+    run(5 * n, 1.0, 0, prd, grd); // fresh shielded reference, distorted truth
+    const Real g0d =
+      (uofx(cs.L - 0.5 * dx) - uofx(cs.L - 1.5 * dx)) / dx;
+    std::printf(
+      "\n     distorted truth (Richards k=3), tanh-family fit; exact du/dn "
+      "%.0f\n",
+      g0d);
+    auto rowd = [&](const int mode) {
+      run(n, 1.0, mode, ptd, gtd);
+      std::printf("    %6.2f  %5s  ", 1.0, label[mode]);
+      for (int k = 1; k < NS; k++) {
+        std::printf(" %9.1f", ptd[k] - prd[k]);
+      }
+      std::printf(
+        "   | %5.0f -> %5.0f (exact %.0f)\n", gtd[0], gtd[NS - 1], g0d);
+      return ptd[1] - prd[1];
+    };
+    const Real d1_orc = rowd(2);
+    const Real d1_ent = rowd(0);
+    const Real d1_fitU = rowd(6);
+    const Real dE_fitU = ptd[NS - 1] - prd[NS - 1];
+    const Real d1_fitB = rowd(8);
+    const Real denom = d1_ent - d1_orc;
+    const Real frac =
+      (std::abs(denom) > 1.0e-30) ? (d1_ent - d1_fitU) / denom : 0.0;
+    std::snprintf(
+      buf, sizeof(buf),
+      "at 0.7 tau: ent %.1f, fitU %.1f (t_end %.1f), fitB %.1f, oracle %.1f "
+      "-- the tanh fit recovers %.0f%% of the gap on a non-tanh truth",
+      d1_ent, d1_fitU, dE_fitU, d1_fitB, d1_orc, 100.0 * frac);
+    report("C11x shape-distorted truth", buf);
+    true_shape = 0;
   }
 }
 
