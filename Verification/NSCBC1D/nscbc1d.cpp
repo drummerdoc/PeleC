@@ -1550,6 +1550,106 @@ check_ghost_pressure_bias()
   check(true, "  (reported) order control on the dynamic offset", buf);
 }
 
+// ---------------------------------------------------------------------------
+//  fit_profile_ghosts -- the C11x profile-fit ghost closure, shared by the
+//  C10 (release) and C11 (sustained front) experiments.
+//
+//  The closure knows a tanh profile FAMILY -- end states (u0, ratio_a*u0),
+//  rho = mdot/u, p = p0 + mdot*(u0 - u) -- but not its position or thickness;
+//  both are fitted per call by inverting T at the last two interior cells
+//  through the family (a closed-form value-and-slope match, stateless).  It
+//  overwrites only the MATERIAL content of the kernel-filled ghosts: T from
+//  the fitted profile, rho from the EOS at the kernel's ghost pressure, and
+//  (with_u) the profile's u -- the dilatation structure.  p always stays the
+//  kernel's.
+//
+//  q_src >= 0 applies the SOURCE-CONSISTENCY bound: a steady front obeys
+//  du/dn = dp/dt|_src/(rho c^2) with dp/dt|_src = (gamma-1) q, so the
+//  continuation blends toward the plain kernel by
+//  w = min(1, du/dn_sustainable / du/dn_measured) -- inert on a front the
+//  source sustains, a full release on one it cannot.
+// ---------------------------------------------------------------------------
+void
+fit_profile_ghosts(
+  Field& w,
+  const Real dx,
+  const Real u0,
+  const Real ratio_a,
+  const Real mdot,
+  const Real p0,
+  const Real Y[NUM_SPECIES],
+  const bool with_u,
+  const Real q_src)
+{
+  auto eos = pele::physics::PhysicsType::eos();
+  auto T_of_u = [&](const Real u) {
+    const Real rho = mdot / u;
+    const Real p = p0 + mdot * (u0 - u);
+    Real T = 0.0;
+    eos.RYP2T(rho, Y, p, T);
+    return T;
+  };
+  const Real ua = u0 * (1.0 + 1.0e-9);
+  const Real ub = u0 * ratio_a * (1.0 - 1.0e-9);
+  auto u_of_T = [&](const Real T) {
+    if (T <= T_of_u(ua)) {
+      return ua;
+    }
+    if (T >= T_of_u(ub)) {
+      return ub;
+    }
+    Real a = ua, b = ub;
+    for (int it = 0; it < 60; it++) {
+      const Real m = 0.5 * (a + b);
+      (T_of_u(m) < T ? a : b) = m;
+    }
+    return 0.5 * (a + b);
+  };
+  const int N = w.n - 1;
+  const Prim qN = get_prim(w.at(N));
+  const Prim qM = get_prim(w.at(N - 1));
+  auto arg = [&](const Real T) {
+    Real g = (u_of_T(T) / u0 - 1.0) / (ratio_a - 1.0);
+    g = std::min(std::max(g, 1.0e-9), 1.0 - 1.0e-9);
+    return std::atanh(2.0 * g - 1.0);
+  };
+  const Real aN = arg(qN.T);
+  const Real aM = arg(qM.T);
+  if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
+    return; // no usable structure in T; the kernel's ghosts stand
+  }
+  Real wgt = 1.0;
+  if (q_src >= 0.0) {
+    const Real c_N = sound_speed(qN);
+    const Real gam = qN.rho * c_N * c_N / qN.p;
+    const Real g_sus = (gam - 1.0) * q_src / (qN.rho * c_N * c_N);
+    const Real g_meas = (qN.u - qM.u) / dx;
+    wgt =
+      (g_meas > 1.0e-12 * u0 / dx) ? std::min(1.0, g_sus / g_meas) : 0.0;
+    if (wgt <= 0.0) {
+      return; // nothing sustainable; released to the plain kernel
+    }
+  }
+  const Real lam = dx / (aN - aM);
+  const Real sh = (N + 0.5) * dx - lam * aN;
+  for (int layer = 1; layer <= NG; layer++) {
+    const int i = N + layer;
+    const Real x = (i + 0.5) * dx;
+    const Real gg = 0.5 * (1.0 + std::tanh((x - sh) / lam));
+    const Real uf = u0 * (1.0 + (ratio_a - 1.0) * gg);
+    const Real rf = mdot / uf;
+    const Real pf = p0 + mdot * (u0 - uf);
+    Real Tf = 0.0;
+    eos.RYP2T(rf, Y, pf, Tf);
+    const Prim qg = get_prim(w.at(i)); // the kernel's fill: p always kept
+    const Real Tb = wgt * Tf + (1.0 - wgt) * qg.T;
+    const Real ub2 = with_u ? (wgt * uf + (1.0 - wgt) * qg.u) : qg.u;
+    Real rho_g = 0.0, e_g = 0.0;
+    eos.PYT2RE(qg.p, Y, Tb, rho_g, e_g);
+    set_state(w.at(i), rho_g, ub2, Tb, Y);
+  }
+}
+
 // C10: does the ghost-pressure bias of C9(a) actually DRIVE the solution?
 //
 //      C9(a) establishes the bias exactly, but statically.  C9(b) tried to make
@@ -1656,81 +1756,6 @@ check_extrapolation_drives_solution()
     Field f(nc), g(nc), h(nc);
     init(f, nc, ratio);
 
-    // q_src < 0: unbounded (bmode 2).  q_src >= 0: the source-consistency
-    // bound of C11x (bmode 3) -- and on this SOURCE-FREE problem the honest
-    // measured source is zero, so the bound should refuse the continuation
-    // outright and hand every fill back to the plain kernel.  That is the
-    // release mechanism under test.
-    auto fit_ghosts = [&](Field& w, const Real q_src) {
-      auto eos2 = pele::physics::PhysicsType::eos();
-      auto T_of_u = [&](const Real u) {
-        const Real rho = mdot / u;
-        const Real p = cs.p0 + mdot * (u0 - u);
-        Real T = 0.0;
-        eos2.RYP2T(rho, Y, p, T);
-        return T;
-      };
-      const Real ua = u0 * (1.0 + 1.0e-9);
-      const Real ub = u0 * ratio * (1.0 - 1.0e-9);
-      auto u_of_T = [&](const Real T) {
-        if (T <= T_of_u(ua)) {
-          return ua;
-        }
-        if (T >= T_of_u(ub)) {
-          return ub;
-        }
-        Real a = ua, b = ub;
-        for (int it = 0; it < 60; it++) {
-          const Real m = 0.5 * (a + b);
-          (T_of_u(m) < T ? a : b) = m;
-        }
-        return 0.5 * (a + b);
-      };
-      const int N = w.n - 1;
-      auto arg = [&](const Real T) {
-        Real gp = (u_of_T(T) / u0 - 1.0) / (ratio - 1.0);
-        gp = std::min(std::max(gp, 1.0e-9), 1.0 - 1.0e-9);
-        return std::atanh(2.0 * gp - 1.0);
-      };
-      const Prim qN = get_prim(w.at(N));
-      const Prim qM = get_prim(w.at(N - 1));
-      const Real aN = arg(qN.T);
-      const Real aM = arg(qM.T);
-      if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
-        return; // no structure to fit; the kernel's ghosts stand
-      }
-      if (q_src >= 0.0) {
-        const Real c_N = sound_speed(qN);
-        const Real gam = qN.rho * c_N * c_N / qN.p;
-        const Real g_sus = (gam - 1.0) * q_src / (qN.rho * c_N * c_N);
-        const Real g_meas = (qN.u - qM.u) / dx;
-        const Real wgt = (g_meas > 1.0e-12 * u0 / dx)
-                           ? std::min(1.0, g_sus / g_meas)
-                           : 0.0;
-        if (wgt <= 0.0) {
-          return; // nothing sustainable; released to the plain kernel
-        }
-        // (a partial wgt would blend as in C11x; on this problem the
-        // measured source is exactly zero, so it never arises)
-      }
-      const Real lam = dx / (aN - aM);
-      const Real sh = (N + 0.5) * dx - lam * aN;
-      for (int layer = 1; layer <= NG; layer++) {
-        const int i = N + layer;
-        const Real x = (i + 0.5) * dx;
-        const Real gg = 0.5 * (1.0 + std::tanh((x - sh) / lam));
-        const Real uf = u0 * (1.0 + (ratio - 1.0) * gg);
-        const Real rf = mdot / uf;
-        const Real pf = cs.p0 + mdot * (u0 - uf);
-        Real Tf = 0.0;
-        eos2.RYP2T(rf, Y, pf, Tf);
-        const Prim qg = get_prim(w.at(i));
-        Real rho_g = 0.0, e_g = 0.0;
-        eos2.PYT2RE(qg.p, Y, Tf, rho_g, e_g);
-        set_state(w.at(i), rho_g, uf, Tf, Y);
-      }
-    };
-
     pc_nscbc::Params prm;
     prm.L_ref = nc * dx;
     prm.sigma = sigma;
@@ -1770,7 +1795,9 @@ check_extrapolation_drives_solution()
         }
         fill_bcs(f, off, out, prm, dx);
         if (bmode >= 2) {
-          fit_ghosts(f, (bmode == 3) ? 0.0 : -1.0);
+          fit_profile_ghosts(
+            f, dx, u0, ratio, mdot, cs.p0, Y, true,
+            (bmode == 3) ? 0.0 : -1.0);
         }
         stage(f, g, dx, dt);
         for (int layer = 1; layer <= NG; layer++) {
@@ -1778,7 +1805,9 @@ check_extrapolation_drives_solution()
         }
         fill_bcs(g, off, out, prm, dx);
         if (bmode >= 2) {
-          fit_ghosts(g, (bmode == 3) ? 0.0 : -1.0);
+          fit_profile_ghosts(
+            g, dx, u0, ratio, mdot, cs.p0, Y, true,
+            (bmode == 3) ? 0.0 : -1.0);
         }
         stage(g, h, dx, dt);
         for (int i = 0; i < nc; i++) {
@@ -2046,114 +2075,6 @@ check_sustained_ramp()
       }
     };
 
-    // Profile-fit ghosts -- the C11x experiment.  Between extrap_temperature
-    // (structure = a line) and the oracle (structure = the exact answer,
-    // placed exactly) sits the practically available option: the closure
-    // knows the profile FAMILY -- tanh between the end states, the analogue
-    // of owning an unstretched 1-D flame solution -- but not where the front
-    // is or how thick it is.  Per fill it fits both: invert T at the last
-    // two interior cells through the assumed family to two tanh arguments
-    // (a closed-form value-and-slope match, refreshed statelessly from the
-    // interior every fill), then overwrite only the MATERIAL content of the
-    // kernel-filled ghosts: T from the fitted profile, rho from the EOS at
-    // the KERNEL's ghost pressure.  p and u stay the kernel's -- the profile
-    // never touches the acoustic pair, whose error budget (C9) is a
-    // thousandfold tighter than the material one's.
-    //
-    // ratio_a is the assumed burnt/unburnt end-state ratio.  ratio_a ==
-    // ratio is the honest fit; ratio_a != ratio is the stretch analogue --
-    // the real flame's structure differs from the library profile by
-    // curvature and stretch, modelled here as fitting through a family whose
-    // end state is 15% wrong.  (mdot and p0 are taken as known: both are
-    // materially measurable at the boundary cell.)
-    // q_src < 0: no bound.  q_src >= 0: the SOURCE-CONSISTENCY bound.  The
-    // continued structure's amplitude is capped by what the measured local
-    // source can sustain: a steady front obeys du/dn = dp/dt|_src / (rho c^2)
-    // (the same Sutherland-Kennedy relation behind beta_s), with dp/dt|_src =
-    // (gamma - 1) q for an energy source q.  The blend weight
-    //     w = min(1, du/dn_sustainable / du/dn_measured)
-    // interpolates each ghost between the fitted profile (w = 1) and the
-    // plain kernel fill (w = 0).  A sustained front measures w ~ 1 and keeps
-    // the full continuation; a source-free structure measures w = 0 and is
-    // RELEASED -- the stateless answer to the C10 failure mode.  Here q is
-    // the manufactured source handed in exactly; a PeleC closure would use
-    // reaction_dpdt plus the diffusive dp/dt, and inherits their coverage.
-    auto fit_ghosts = [&](Field& w, const Real ratio_a, const bool with_u,
-                          const Real q_src) {
-      auto eos2 = pele::physics::PhysicsType::eos();
-      auto T_of_u = [&](const Real u) {
-        const Real rho = mdot / u;
-        const Real p = cs.p0 + mdot * (u0 - u);
-        Real T = 0.0;
-        eos2.RYP2T(rho, Y, p, T);
-        return T;
-      };
-      const Real ua = u0 * (1.0 + 1.0e-9);
-      const Real ub = u0 * ratio_a * (1.0 - 1.0e-9);
-      auto u_of_T = [&](const Real T) {
-        // T(u) is monotone increasing over the family's range; bisect.
-        if (T <= T_of_u(ua)) {
-          return ua;
-        }
-        if (T >= T_of_u(ub)) {
-          return ub;
-        }
-        Real a = ua, b = ub;
-        for (int it = 0; it < 60; it++) {
-          const Real m = 0.5 * (a + b);
-          (T_of_u(m) < T ? a : b) = m;
-        }
-        return 0.5 * (a + b);
-      };
-      const int N = w.n - 1;
-      auto arg = [&](const Real T) {
-        Real g = (u_of_T(T) / u0 - 1.0) / (ratio_a - 1.0);
-        g = std::min(std::max(g, 1.0e-9), 1.0 - 1.0e-9);
-        return std::atanh(2.0 * g - 1.0);
-      };
-      const Prim qN = get_prim(w.at(N));
-      const Prim qM = get_prim(w.at(N - 1));
-      const Real aN = arg(qN.T);
-      const Real aM = arg(qM.T);
-      if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
-        return; // no usable structure in T; keep the kernel's ghosts
-      }
-      Real wgt = 1.0;
-      if (q_src >= 0.0) {
-        const Real c_N = sound_speed(qN);
-        const Real gam = qN.rho * c_N * c_N / qN.p;
-        const Real g_sus = (gam - 1.0) * q_src / (qN.rho * c_N * c_N);
-        const Real g_meas = (qN.u - qM.u) / dx;
-        wgt = (g_meas > 1.0e-12 * u0 / dx)
-                ? std::min(1.0, g_sus / g_meas)
-                : 0.0;
-        if (wgt <= 0.0) {
-          return; // nothing sustainable; the kernel's ghosts stand
-        }
-      }
-      const Real lam = dx / (aN - aM);
-      const Real sh = (N + 0.5) * dx - lam * aN;
-      for (int layer = 1; layer <= NG; layer++) {
-        const int i = N + layer;
-        const Real x = (i + 0.5) * dx;
-        const Real gg = 0.5 * (1.0 + std::tanh((x - sh) / lam));
-        const Real uf = u0 * (1.0 + (ratio_a - 1.0) * gg);
-        const Real rf = mdot / uf;
-        const Real pf = cs.p0 + mdot * (u0 - uf);
-        Real Tf = 0.0;
-        eos2.RYP2T(rf, Y, pf, Tf);
-        const Prim qg = get_prim(w.at(i)); // the kernel's fill: p always kept
-        // with_u: also take the profile's velocity -- the dilatation jump
-        // across the front, the same field extrap_material continues.  The
-        // pressure NEVER comes from the profile; it stays the relaxation's.
-        const Real Tb = wgt * Tf + (1.0 - wgt) * qg.T;
-        const Real ub = with_u ? (wgt * uf + (1.0 - wgt) * qg.u) : qg.u;
-        Real rho_g = 0.0, e_g = 0.0;
-        eos2.PYT2RE(qg.p, Y, Tb, rho_g, e_g);
-        set_state(w.at(i), rho_g, ub, Tb, Y);
-      }
-    };
-
     pc_nscbc::Params prm;
     prm.L_ref = nc * dx;
     prm.sigma = sigma;
@@ -2194,9 +2115,9 @@ check_sustained_ramp()
         if (mode == 2) {
           oracle_ghosts(f);
         } else if (mode >= 4) {
-          fit_ghosts(
-            f, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6,
-            (mode == 8) ? q[nc - 1] : -1.0);
+          fit_profile_ghosts(
+            f, dx, u0, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio,
+            mdot, cs.p0, Y, mode >= 6, (mode == 8) ? q[nc - 1] : -1.0);
         }
         stage(f, g, dx, dt);
         add_source(g, q, dt);
@@ -2207,9 +2128,9 @@ check_sustained_ramp()
         if (mode == 2) {
           oracle_ghosts(g);
         } else if (mode >= 4) {
-          fit_ghosts(
-            g, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6,
-            (mode == 8) ? q[nc - 1] : -1.0);
+          fit_profile_ghosts(
+            g, dx, u0, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio,
+            mdot, cs.p0, Y, mode >= 6, (mode == 8) ? q[nc - 1] : -1.0);
         }
         stage(g, h, dx, dt);
         add_source(h, q, dt);
@@ -2562,25 +2483,42 @@ check_reaction_source()
     ok && std::abs(analytic - v0) / std::abs(v0) < 1e-2,
     "real-gas FD path agrees with an independent FD", buf);
 #else
-  Real prev_err = 1e300;
-  bool converging = true;
+  // A refining FD trades truncation error for cancellation error, and where
+  // the crossover lands depends on the toolchain (llvm/arm64 hits the floor
+  // one refinement earlier than gcc/x86).  So the gate is floor-aware:
+  // errors must decrease monotonically UNTIL the minimum, and the minimum
+  // must sit at the round-off floor -- not monotone-to-the-end, which gates
+  // the machine rather than the mathematics.
+  Real err_k[4], min_err = 1e300;
+  int argmin = 0;
   std::printf("      analytic dp/dt|_react = %.6e dyn/(cm^2 s)\n", analytic);
   for (int k = 0; k < 4; k++) {
     const Real tau = tau0 / std::pow(4.0, k);
     const Real v = fd(tau);
-    const Real err = std::abs(v - analytic) / std::abs(analytic);
-    std::printf("      tau = %.3e  FD = %.6e  rel err = %.3e\n", tau, v, err);
-    if (k > 0 && err > prev_err * 1.05) {
-      converging = false;
+    err_k[k] = std::abs(v - analytic) / std::abs(analytic);
+    std::printf(
+      "      tau = %.3e  FD = %.6e  rel err = %.3e\n", tau, v, err_k[k]);
+    if (err_k[k] < min_err) {
+      min_err = err_k[k];
+      argmin = k;
     }
-    prev_err = err;
   }
-  std::snprintf(buf, sizeof(buf), "final relative error %.3e", prev_err);
+  bool converging = true;
+  for (int k = 1; k <= argmin; k++) {
+    converging = converging && (err_k[k] < err_k[k - 1] * 1.05);
+  }
+  std::snprintf(buf, sizeof(buf), "final relative error %.3e", err_k[3]);
   check(
-    ok && prev_err < 1e-3, "closed-form dp/dt matches the directional FD", buf);
+    ok && err_k[3] < 1e-3, "closed-form dp/dt matches the directional FD",
+    buf);
+  std::snprintf(
+    buf, sizeof(buf),
+    "error falls monotonically to %.2e at tau/%.0f, then sits at the "
+    "round-off floor",
+    min_err, std::pow(4.0, argmin));
   check(
-    converging, "FD converges toward the closed form as tau -> 0",
-    "error decreases monotonically");
+    converging && (min_err < 1e-6),
+    "FD converges to the closed form's round-off floor", buf);
 #endif
 
   // A frozen (cold) state must give exactly zero, so beta_s is a no-op there.

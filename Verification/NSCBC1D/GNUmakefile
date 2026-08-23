@@ -38,6 +38,7 @@ USE_CUDA  = FALSE
 BL_NO_FORT = TRUE
 
 Chemistry_Model ?= air
+PELE_EOS        ?= Fuego
 
 programs += nscbc1d
 
@@ -67,9 +68,15 @@ PP_DIRS := $(PP)/Source \
 VPATH_LOCATIONS   += . $(PELE_HOME)/Source $(PP_DIRS)
 INCLUDE_LOCATIONS += . $(PELE_HOME)/Source $(PP_DIRS)
 
-# The same set the CMake build defines: no advected or auxiliary variables,
-# Fuego EOS, constant transport.
-DEFINES += -DUSE_FUEGO_EOS -DUSE_CONSTANT_TRANSPORT -DNUM_ADV=0 -DNUM_AUX=0
+# The same set the CMake build defines: no advected or auxiliary variables.
+# SRK forbids constant transport (PelePhysicsConstraints.H); pair it with
+# simple transport, as the CMake build does.
+ifeq ($(PELE_EOS),SRK)
+DEFINES += -DUSE_SRK_EOS -DUSE_SIMPLE_TRANSPORT
+else
+DEFINES += -DUSE_FUEGO_EOS -DUSE_CONSTANT_TRANSPORT
+endif
+DEFINES += -DNUM_ADV=0 -DNUM_AUX=0
 
 include $(AMREX_HOME)/Tools/GNUMake/Make.rules
 
