@@ -1656,7 +1656,12 @@ check_extrapolation_drives_solution()
     Field f(nc), g(nc), h(nc);
     init(f, nc, ratio);
 
-    auto fit_ghosts = [&](Field& w) {
+    // q_src < 0: unbounded (bmode 2).  q_src >= 0: the source-consistency
+    // bound of C11x (bmode 3) -- and on this SOURCE-FREE problem the honest
+    // measured source is zero, so the bound should refuse the continuation
+    // outright and hand every fill back to the plain kernel.  That is the
+    // release mechanism under test.
+    auto fit_ghosts = [&](Field& w, const Real q_src) {
       auto eos2 = pele::physics::PhysicsType::eos();
       auto T_of_u = [&](const Real u) {
         const Real rho = mdot / u;
@@ -1687,10 +1692,26 @@ check_extrapolation_drives_solution()
         gp = std::min(std::max(gp, 1.0e-9), 1.0 - 1.0e-9);
         return std::atanh(2.0 * gp - 1.0);
       };
-      const Real aN = arg(get_prim(w.at(N)).T);
-      const Real aM = arg(get_prim(w.at(N - 1)).T);
+      const Prim qN = get_prim(w.at(N));
+      const Prim qM = get_prim(w.at(N - 1));
+      const Real aN = arg(qN.T);
+      const Real aM = arg(qM.T);
       if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
         return; // no structure to fit; the kernel's ghosts stand
+      }
+      if (q_src >= 0.0) {
+        const Real c_N = sound_speed(qN);
+        const Real gam = qN.rho * c_N * c_N / qN.p;
+        const Real g_sus = (gam - 1.0) * q_src / (qN.rho * c_N * c_N);
+        const Real g_meas = (qN.u - qM.u) / dx;
+        const Real wgt = (g_meas > 1.0e-12 * u0 / dx)
+                           ? std::min(1.0, g_sus / g_meas)
+                           : 0.0;
+        if (wgt <= 0.0) {
+          return; // nothing sustainable; released to the plain kernel
+        }
+        // (a partial wgt would blend as in C11x; on this problem the
+        // measured source is exactly zero, so it never arises)
       }
       const Real lam = dx / (aN - aM);
       const Real sh = (N + 0.5) * dx - lam * aN;
@@ -1748,16 +1769,16 @@ check_extrapolation_drives_solution()
           set_state(f.at(-layer), rho0, u0, cs.T0, Y);
         }
         fill_bcs(f, off, out, prm, dx);
-        if (bmode == 2) {
-          fit_ghosts(f);
+        if (bmode >= 2) {
+          fit_ghosts(f, (bmode == 3) ? 0.0 : -1.0);
         }
         stage(f, g, dx, dt);
         for (int layer = 1; layer <= NG; layer++) {
           set_state(g.at(-layer), rho0, u0, cs.T0, Y);
         }
         fill_bcs(g, off, out, prm, dx);
-        if (bmode == 2) {
-          fit_ghosts(g);
+        if (bmode >= 2) {
+          fit_ghosts(g, (bmode == 3) ? 0.0 : -1.0);
         }
         stage(g, h, dx, dt);
         for (int i = 0; i < nc; i++) {
@@ -1787,7 +1808,7 @@ check_extrapolation_drives_solution()
   Real eh[NS], gh[NS], gr[NS];
   auto row = [&](const Real sigma, const int order, const Real ratio,
                  const int bmode = 0) {
-    const char* bl[3] = {"  ", " m", " f"};
+    const char* bl[4] = {"  ", " m", " f", " b"};
     err(sigma, order, ratio, bmode, eh, gh, gr);
     std::printf("    %6.2f %6d %6.1f%s", sigma, order, ratio, bl[bmode]);
     for (int k = 1; k < NS; k++) {
@@ -1871,6 +1892,20 @@ check_extrapolation_drives_solution()
     "du/dn at face -> %.0f (ref -> %.0f)",
     e_r4, e_mat, e_fit, g_fit_end, gr[NS - 1]);
   report("C11x release: the fit on a ramp that must be let go", buf);
+
+  // --- and the same fit behind the source-consistency bound ---------------
+  // The closure measures the local source (here exactly zero), computes the
+  // sustainable dilatation, and refuses any continuation beyond it.  On a
+  // source-free ramp that is a full refusal, so this row should reproduce
+  // the plain-kernel row: the release is complete, by construction rather
+  // than by decay-tracking.
+  const Real e_fitB = row(1.0, 2, 4.0, 3);
+  std::snprintf(
+    buf, sizeof(buf),
+    "error at t_end: plain %.1f, unbounded fitU %.1f, source-bounded %.1f "
+    "-- the bound releases what the source cannot sustain",
+    e_r4, e_fit, e_fitB);
+  report("C11x release under the source-consistency bound", buf);
 }
 
 // C11: the sustained ramp -- a front crossing the outflow, with an exact
@@ -2018,7 +2053,20 @@ check_sustained_ramp()
     // curvature and stretch, modelled here as fitting through a family whose
     // end state is 15% wrong.  (mdot and p0 are taken as known: both are
     // materially measurable at the boundary cell.)
-    auto fit_ghosts = [&](Field& w, const Real ratio_a, const bool with_u) {
+    // q_src < 0: no bound.  q_src >= 0: the SOURCE-CONSISTENCY bound.  The
+    // continued structure's amplitude is capped by what the measured local
+    // source can sustain: a steady front obeys du/dn = dp/dt|_src / (rho c^2)
+    // (the same Sutherland-Kennedy relation behind beta_s), with dp/dt|_src =
+    // (gamma - 1) q for an energy source q.  The blend weight
+    //     w = min(1, du/dn_sustainable / du/dn_measured)
+    // interpolates each ghost between the fitted profile (w = 1) and the
+    // plain kernel fill (w = 0).  A sustained front measures w ~ 1 and keeps
+    // the full continuation; a source-free structure measures w = 0 and is
+    // RELEASED -- the stateless answer to the C10 failure mode.  Here q is
+    // the manufactured source handed in exactly; a PeleC closure would use
+    // reaction_dpdt plus the diffusive dp/dt, and inherits their coverage.
+    auto fit_ghosts = [&](Field& w, const Real ratio_a, const bool with_u,
+                          const Real q_src) {
       auto eos2 = pele::physics::PhysicsType::eos();
       auto T_of_u = [&](const Real u) {
         const Real rho = mdot / u;
@@ -2050,10 +2098,25 @@ check_sustained_ramp()
         g = std::min(std::max(g, 1.0e-9), 1.0 - 1.0e-9);
         return std::atanh(2.0 * g - 1.0);
       };
-      const Real aN = arg(get_prim(w.at(N)).T);
-      const Real aM = arg(get_prim(w.at(N - 1)).T);
+      const Prim qN = get_prim(w.at(N));
+      const Prim qM = get_prim(w.at(N - 1));
+      const Real aN = arg(qN.T);
+      const Real aM = arg(qM.T);
       if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
         return; // no usable structure in T; keep the kernel's ghosts
+      }
+      Real wgt = 1.0;
+      if (q_src >= 0.0) {
+        const Real c_N = sound_speed(qN);
+        const Real gam = qN.rho * c_N * c_N / qN.p;
+        const Real g_sus = (gam - 1.0) * q_src / (qN.rho * c_N * c_N);
+        const Real g_meas = (qN.u - qM.u) / dx;
+        wgt = (g_meas > 1.0e-12 * u0 / dx)
+                ? std::min(1.0, g_sus / g_meas)
+                : 0.0;
+        if (wgt <= 0.0) {
+          return; // nothing sustainable; the kernel's ghosts stand
+        }
       }
       const Real lam = dx / (aN - aM);
       const Real sh = (N + 0.5) * dx - lam * aN;
@@ -2067,12 +2130,14 @@ check_sustained_ramp()
         Real Tf = 0.0;
         eos2.RYP2T(rf, Y, pf, Tf);
         const Prim qg = get_prim(w.at(i)); // the kernel's fill: p always kept
-        Real rho_g = 0.0, e_g = 0.0;
-        eos2.PYT2RE(qg.p, Y, Tf, rho_g, e_g);
         // with_u: also take the profile's velocity -- the dilatation jump
         // across the front, the same field extrap_material continues.  The
         // pressure NEVER comes from the profile; it stays the relaxation's.
-        set_state(w.at(i), rho_g, with_u ? uf : qg.u, Tf, Y);
+        const Real Tb = wgt * Tf + (1.0 - wgt) * qg.T;
+        const Real ub = with_u ? (wgt * uf + (1.0 - wgt) * qg.u) : qg.u;
+        Real rho_g = 0.0, e_g = 0.0;
+        eos2.PYT2RE(qg.p, Y, Tb, rho_g, e_g);
+        set_state(w.at(i), rho_g, ub, Tb, Y);
       }
     };
 
@@ -2117,7 +2182,8 @@ check_sustained_ramp()
           oracle_ghosts(f);
         } else if (mode >= 4) {
           fit_ghosts(
-            f, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6);
+            f, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6,
+            (mode == 8) ? q[nc - 1] : -1.0);
         }
         stage(f, g, dx, dt);
         add_source(g, q, dt);
@@ -2129,7 +2195,8 @@ check_sustained_ramp()
           oracle_ghosts(g);
         } else if (mode >= 4) {
           fit_ghosts(
-            g, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6);
+            g, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6,
+            (mode == 8) ? q[nc - 1] : -1.0);
         }
         stage(g, h, dx, dt);
         add_source(h, q, dt);
@@ -2237,8 +2304,8 @@ check_sustained_ramp()
     "\n     sigma  ghost   <p>-<p>_ref at t_end/3 .. t_end   | du/dn at the "
     "face\n");
   Real pt[NS], gt[NS];
-  const char* label[8] = {"ent",  "mat", "orc",  "e_T",
-                          "fit",  "fitX", "fitU", "fitUX"};
+  const char* label[9] = {"ent",  "mat",  "orc",   "e_T", "fit",
+                          "fitX", "fitU", "fitUX", "fitB"};
   auto row = [&](const Real sigma, const int mode) {
     run(n, sigma, mode, pt, gt);
     std::printf("    %6.2f  %5s  ", sigma, label[mode]);
@@ -2268,12 +2335,15 @@ check_sustained_ramp()
   row(1.0, 5);
   const Real g_fitX = gt[NS - 1];
   const Real e1_fitX = pt[1] - pr[1];
-  row(1.0, 6);
+  const Real eE_fitU = row(1.0, 6);
   const Real g_fitU = gt[NS - 1];
   const Real e1_fitU = pt[1] - pr[1];
   row(1.0, 7);
   const Real g_fitUX = gt[NS - 1];
   const Real e1_fitUX = pt[1] - pr[1];
+  const Real eE_fitB = row(1.0, 8);
+  const Real g_fitB = gt[NS - 1];
+  const Real e1_fitB = pt[1] - pr[1];
 
   // What the oracle row establishes: a ghost fill that carries the exact
   // continuation HOLDS the sustained front, in this same truncated domain,
@@ -2350,6 +2420,12 @@ check_sustained_ramp()
       "%.0f), oracle %.0f (exact %.0f)",
       g_eT, g_fit, g_mat, g_fitU, g_fitUX, g_orc, g0);
     report("C11x structure at the face", buf);
+    std::snprintf(
+      buf, sizeof(buf),
+      "source-bounded fitU on the SUSTAINED front: %.1f at 0.7 tau, %.1f at "
+      "t_end, du/dn -> %.0f (unbounded fitU %.1f / %.1f / %.0f)",
+      e1_fitB, eE_fitB, g_fitB, e1_fitU, eE_fitU, g_fitU);
+    report("C11x the bound must not tax the sustained front", buf);
   }
 }
 

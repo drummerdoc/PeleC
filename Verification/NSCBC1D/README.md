@@ -118,17 +118,36 @@ pressure never comes from the profile in any row; it stays the relaxation's.
 The release side is measured on C10's decaying ramp (the structure a correct
 boundary must let die; `extrap_material`'s known failure). At t_end, ⟨p⟩
 error: plain kernel **+1477**, `extrap_material` **−20406** (holds the ramp
-alive), profile-fitU **−3499**. So the stateless re-fit releases *partially*
-— 6× softer than `extrap_material`, because the fitted thickness grows as the
-interior slope weakens — but it still over-vents relative to leaving the
-closure off, and the diagnosis is structural: the two-parameter family can
-shift and widen but cannot represent a *shrinking amplitude*, so during the
-decay it keeps imposing full-amplitude structure through weakened data. A
-usable closure needs either an amplitude degree of freedom in the fit or a
-transit/decay gate in front of it.
+alive), unbounded profile-fitU **−3499**. The stateless re-fit releases only
+*partially* — the two-parameter family can shift and widen but cannot
+represent a shrinking amplitude, so during the decay it keeps imposing
+full-amplitude structure through weakened data.
 
-Still untested: multi-species fitting on a progress variable, and a
-shape-distorted (not merely end-state-distorted) family.
+The repair is the **source-consistency bound** (`fitB`): a steady front obeys
+du/dn = (dp/dt)|src / ρc² (the Sutherland–Kennedy relation behind β_s), so
+the continuation's amplitude is blended toward the plain kernel by
+w = min(1, du/dn_sustainable / du/dn_measured), with the sustainable
+dilatation computed from the measured local source. Measured, both horns:
+
+| | sustained front (C11), 0.7 τ / t_end | decaying ramp (C10), t_end |
+|---|---|---|
+| plain kernel | 15707 / 27129 | **+1477** |
+| `extrap_material` | 3175 / 27210 | −20406 |
+| fitU, unbounded | **66.8 / 79.8** | −3499 |
+| **fitU + source bound** | **66.8 / 79.8** | **+1477** |
+| oracle | −38.1 / −54.7 | — |
+
+On the sustained front the bound is inert to the printed digit — the
+manufactured source sustains du/dn = 448 against the actual 449, so w ≈
+0.998 — and on the source-free ramp it refuses the continuation outright and
+reproduces the plain kernel exactly. One stateless closure now passes both
+qualifications. (Here the closure is handed the manufactured source exactly;
+a PeleC version would assemble dp/dt|src from `reaction_dpdt` plus the
+diffusive term, and inherits their coverage and their gaps.)
+
+Still untested: multi-species fitting on a progress variable, a
+shape-distorted (not merely end-state-distorted) family, and the interaction
+with β_s = 0, which feeds the same S_p into the incoming wave.
 
 ## Reference results
 
