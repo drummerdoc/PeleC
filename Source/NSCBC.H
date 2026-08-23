@@ -205,21 +205,26 @@ struct Params
   // near-tangentially, is best at beta = 0.8.
   //
   //     COVO   rms residual vs the no-boundary floor:
-  //            hard 14.0x,  beta=1 10.0x,  beta=0.5 3.8x,  beta=0.2 16.1x,
-  //            beta=0 132x
+  //            hard 14.0x,  beta=1 10.0x,  beta=0.8 7.3x,  beta=0.5 3.8x,
+  //            beta=0.2 6.9x,  beta=0 132x,  local-Mach 16.1x
   //     pulse  front amplitude spread around the arc:
-  //            hard 21.4%,  beta=1 0.90%,  beta=0.8 0.066%,  beta=0 2.9%
+  //            hard 21.4%,  beta=1 0.90%,  beta=0.8 0.066%,  beta=0.5 1.08%,
+  //            beta=0.2 2.21%,  beta=0 2.9%
   //
   // Note the shape of that curve: too little correction costs a factor of a
-  // few, too much is catastrophic.  beta below ~0.3 is worse than no
-  // transverse terms at all, and beta = 0 is close to unstable.  This is why
-  // the default is 1 (the Phase 1 behaviour) and not the optimum -- a wrong
-  // beta is far more dangerous than an absent one.  Start at 0.5, and raise
-  // it toward 1 if the boundary is mostly met at grazing incidence.
+  // few, too much is catastrophic -- beta = 0 is close to unstable.  This is
+  // why the default is 1 (the Phase 1 behaviour) and not the optimum -- a
+  // wrong beta is far more dangerous than an absent one.  Start at 0.5, and
+  // raise it toward 1 if the boundary is mostly met at grazing incidence.
   //
-  // beta < 0 selects the local Mach number, which is the legacy Fortran's
-  // convention.  The measurements above do not support it: at M = 0.2 it
-  // gives beta = 0.2, which is on the wrong side of the minimum.
+  // beta < 0 selects the local Mach number pointwise, which is the legacy
+  // Fortran's convention.  The measurements do not support it, and the
+  // Phase-0 re-sweep sharpened why: it is not that its VALUE lands wrong (a
+  // constant beta = 0.2 measures 6.9x, better than beta = 1), it is that the
+  // convention varies beta point-by-point with whatever structure is crossing
+  // the boundary -- the vortex swirl modulates M and therefore the correction
+  // -- and that pointwise wobble measures 16.1x, worse than no transverse
+  // terms at all.
   amrex::Real beta = 1.0;
 
   // Weight on the REACTION source term in the modelled incoming acoustic,

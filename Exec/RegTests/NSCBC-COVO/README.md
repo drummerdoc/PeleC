@@ -99,8 +99,17 @@ This is the test that shows the current implementation's limit honestly.
 | NSCBC, β = 0.8 | 0.0341 | 7.3× |
 | NSCBC, **β = 0.5** | **0.0176** | **3.8×** |
 | NSCBC, β = 0.35 | 0.0187 | 4.0× |
-| NSCBC, β = 0.2 (= local Mach) | 0.0754 | 16.1× |
+| NSCBC, β = 0.2 (constant) | 0.0325 | 6.9× |
+| NSCBC, β < 0 (pointwise local Mach) | 0.0754 | 16.1× |
 | NSCBC, β = 0 (full transverse) | 0.6184 | 132× |
+
+(The Phase-0 re-sweep, run after the reaction-source and periodic-seam fixes,
+reproduces every β row above to the digit — the inert 2-D baselines did not
+move — and separates two things an earlier row conflated: a **constant**
+β = 0.2 measures 6.9×, better than β = 1, while the legacy **pointwise
+local-Mach** convention measures 16.1×. The convention's fault is not its
+value but its wobble: the vortex's own swirl modulates M and therefore the
+correction, point by point, as the structure crosses.)
 
 Dial sensitivity at β = 1, for reference: σ = 0 gives 15×, `relax_u` = 0.2 gives
 14×, and hard-inflow + NSCBC-outflow gives 14× — i.e. none of them matters
@@ -125,10 +134,11 @@ residual to 3.8× the floor: 2.7× better than β = 1 and 3.7× better than a ha
 boundary. That is the term the dial sweep was pointing at.
 
 **But the response to β is sharply asymmetric.** Too little correction costs a
-factor of a few; too much is catastrophic — β = 0.2 is worse than no transverse
-terms at all and β = 0 is close to unstable, at 132× the floor. That asymmetry
-is why the shipped default is β = 1 rather than the optimum. A wrong β is far
-more dangerous than an absent one.
+factor of a few; too much is catastrophic — β = 0 is close to unstable, at
+132× the floor — and a *pointwise-varying* β (the local-Mach convention) is
+worse than no transverse terms at all. That asymmetry is why the shipped
+default is β = 1 rather than the optimum. A wrong β is far more dangerous than
+an absent one.
 
 **The optimum is predictable, not empirical.** For a plane wave meeting the
 boundary at angle θ, the correction that exactly cancels the obliqueness error
