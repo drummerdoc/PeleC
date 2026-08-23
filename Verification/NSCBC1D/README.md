@@ -83,6 +83,43 @@ C4 also measures the **inflow** reflection curve: R = 2.3% / 4.8% / 19% / 57% at
 
 The C11 oracle row is the load-bearing negative control: it separates "the ghost-cell *form* cannot do this" (false — the oracle holds the front indefinitely) from "this particular *closure* cannot" (true for the entropy closure, mostly fixed by `extrap_material`).
 
+## C11x — the profile-fit experiment (reported, not gated)
+
+C11 also carries an experiment on the question "if you own a 1-D profile of
+the front, can the boundary use it?" The closure is given the profile *family*
+(tanh between end states — the analogue of owning an unstretched flamelet) but
+not its position or thickness; both are fitted per fill, statelessly, by
+inverting T at the last two interior cells through the family (a closed-form
+value-and-slope match). Ladder rows at σ = 1, ⟨p⟩ error at 0.7 relaxation
+times / at t_end:
+
+| ghost closure | 0.7 τ | t_end | what it supplies |
+|---|---|---|---|
+| entropy | 15707 | 27129 | nothing beyond the algebra |
+| `extrap_temperature` | 16050 | 27076 | linear T |
+| **fit** (profile T only, ρ from EOS at kernel p) | 16044 | 27056 | fitted-profile T |
+| `extrap_material` | 3175 | 27210 | linear T *and* u |
+| **fitU** (profile T and u; p stays relaxed) | **66.8** | **79.8** | fitted-profile structure |
+| fitUX (same, family end-state 15% wrong) | 73.8 | 86.9 | robustness probe |
+| oracle | −38.1 | −54.7 | the exact answer, placed exactly |
+
+Three findings. **Material-only profile information buys nothing here** — fit
+= `extrap_temperature` = entropy to 0.3%, because this MMS is inviscid and its
+boundary error was never in the material content (C12 is where T-content
+pays). **The fitted profile supplying T and u recovers 97% of the
+`extrap_material` → oracle gap** — and, unlike `extrap_material`, it does not
+walk off with the frozen source at late time (79.8 vs 27210 at t_end): the
+per-fill re-fit re-locks the structure to the family and cuts the mismatch
+feedback loop. **The fit is insensitive to a wrong family**: a 15% error in
+the assumed end state costs 9%, because the value-and-slope match absorbs the
+leading-order deformation — the stretch/curvature argument in miniature. The
+pressure never comes from the profile in any row; it stays the relaxation's.
+
+Untested here, and required before this becomes a PeleC closure: the C10
+failure mode (a fitted continuation must *release* a decaying structure —
+the sustained front cannot probe this), multi-species fitting on a progress
+variable, and a shape-distorted (not merely end-state-distorted) family.
+
 ## Reference results
 
 Measured with `air`, `n = 400`, `L = 10 cm`, `order = 2`, a 0.1% Gaussian

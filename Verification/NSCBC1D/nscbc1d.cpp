@@ -1911,10 +1911,89 @@ check_sustained_ramp()
       }
     };
 
+    // Profile-fit ghosts -- the C11x experiment.  Between extrap_temperature
+    // (structure = a line) and the oracle (structure = the exact answer,
+    // placed exactly) sits the practically available option: the closure
+    // knows the profile FAMILY -- tanh between the end states, the analogue
+    // of owning an unstretched 1-D flame solution -- but not where the front
+    // is or how thick it is.  Per fill it fits both: invert T at the last
+    // two interior cells through the assumed family to two tanh arguments
+    // (a closed-form value-and-slope match, refreshed statelessly from the
+    // interior every fill), then overwrite only the MATERIAL content of the
+    // kernel-filled ghosts: T from the fitted profile, rho from the EOS at
+    // the KERNEL's ghost pressure.  p and u stay the kernel's -- the profile
+    // never touches the acoustic pair, whose error budget (C9) is a
+    // thousandfold tighter than the material one's.
+    //
+    // ratio_a is the assumed burnt/unburnt end-state ratio.  ratio_a ==
+    // ratio is the honest fit; ratio_a != ratio is the stretch analogue --
+    // the real flame's structure differs from the library profile by
+    // curvature and stretch, modelled here as fitting through a family whose
+    // end state is 15% wrong.  (mdot and p0 are taken as known: both are
+    // materially measurable at the boundary cell.)
+    auto fit_ghosts = [&](Field& w, const Real ratio_a, const bool with_u) {
+      auto eos2 = pele::physics::PhysicsType::eos();
+      auto T_of_u = [&](const Real u) {
+        const Real rho = mdot / u;
+        const Real p = cs.p0 + mdot * (u0 - u);
+        Real T = 0.0;
+        eos2.RYP2T(rho, Y, p, T);
+        return T;
+      };
+      const Real ua = u0 * (1.0 + 1.0e-9);
+      const Real ub = u0 * ratio_a * (1.0 - 1.0e-9);
+      auto u_of_T = [&](const Real T) {
+        // T(u) is monotone increasing over the family's range; bisect.
+        if (T <= T_of_u(ua)) {
+          return ua;
+        }
+        if (T >= T_of_u(ub)) {
+          return ub;
+        }
+        Real a = ua, b = ub;
+        for (int it = 0; it < 60; it++) {
+          const Real m = 0.5 * (a + b);
+          (T_of_u(m) < T ? a : b) = m;
+        }
+        return 0.5 * (a + b);
+      };
+      const int N = w.n - 1;
+      auto arg = [&](const Real T) {
+        Real g = (u_of_T(T) / u0 - 1.0) / (ratio_a - 1.0);
+        g = std::min(std::max(g, 1.0e-9), 1.0 - 1.0e-9);
+        return std::atanh(2.0 * g - 1.0);
+      };
+      const Real aN = arg(get_prim(w.at(N)).T);
+      const Real aM = arg(get_prim(w.at(N - 1)).T);
+      if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
+        return; // no usable structure in T; keep the kernel's ghosts
+      }
+      const Real lam = dx / (aN - aM);
+      const Real sh = (N + 0.5) * dx - lam * aN;
+      for (int layer = 1; layer <= NG; layer++) {
+        const int i = N + layer;
+        const Real x = (i + 0.5) * dx;
+        const Real gg = 0.5 * (1.0 + std::tanh((x - sh) / lam));
+        const Real uf = u0 * (1.0 + (ratio_a - 1.0) * gg);
+        const Real rf = mdot / uf;
+        const Real pf = cs.p0 + mdot * (u0 - uf);
+        Real Tf = 0.0;
+        eos2.RYP2T(rf, Y, pf, Tf);
+        const Prim qg = get_prim(w.at(i)); // the kernel's fill: p always kept
+        Real rho_g = 0.0, e_g = 0.0;
+        eos2.PYT2RE(qg.p, Y, Tf, rho_g, e_g);
+        // with_u: also take the profile's velocity -- the dilatation jump
+        // across the front, the same field extrap_material continues.  The
+        // pressure NEVER comes from the profile; it stays the relaxation's.
+        set_state(w.at(i), rho_g, with_u ? uf : qg.u, Tf, Y);
+      }
+    };
+
     pc_nscbc::Params prm;
     prm.L_ref = nc * dx;
     prm.sigma = sigma;
     prm.extrap_material = (mode == 1);
+    prm.extrap_temperature = (mode == 3);
     pc_nscbc::Target off, out;
     out.type = pc_nscbc::Type::outflow;
     out.p = cs.p0 + mdot * (u0 - uofx(cs.L)); // the exact face pressure
@@ -1949,6 +2028,9 @@ check_sustained_ramp()
         fill_bcs(f, off, out, prm, dx);
         if (mode == 2) {
           oracle_ghosts(f);
+        } else if (mode >= 4) {
+          fit_ghosts(
+            f, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6);
         }
         stage(f, g, dx, dt);
         add_source(g, q, dt);
@@ -1958,6 +2040,9 @@ check_sustained_ramp()
         fill_bcs(g, off, out, prm, dx);
         if (mode == 2) {
           oracle_ghosts(g);
+        } else if (mode >= 4) {
+          fit_ghosts(
+            g, (mode == 5 || mode == 7) ? 0.85 * ratio : ratio, mode >= 6);
         }
         stage(g, h, dx, dt);
         add_source(h, q, dt);
@@ -2065,7 +2150,8 @@ check_sustained_ramp()
     "\n     sigma  ghost   <p>-<p>_ref at t_end/3 .. t_end   | du/dn at the "
     "face\n");
   Real pt[NS], gt[NS];
-  const char* label[3] = {"ent", "mat", "orc"};
+  const char* label[8] = {"ent",  "mat", "orc",  "e_T",
+                          "fit",  "fitX", "fitU", "fitUX"};
   auto row = [&](const Real sigma, const int mode) {
     run(n, sigma, mode, pt, gt);
     std::printf("    %6.2f  %5s  ", sigma, label[mode]);
@@ -2086,6 +2172,21 @@ check_sustained_ramp()
   const Real e_mat1 = row(1.0, 1);
   const Real g_mat = gt[NS - 1];
   const Real e1_mat = pt[1] - pr[1];
+  row(1.0, 3);
+  const Real g_eT = gt[NS - 1];
+  const Real e1_eT = pt[1] - pr[1];
+  row(1.0, 4);
+  const Real g_fit = gt[NS - 1];
+  const Real e1_fit = pt[1] - pr[1];
+  row(1.0, 5);
+  const Real g_fitX = gt[NS - 1];
+  const Real e1_fitX = pt[1] - pr[1];
+  row(1.0, 6);
+  const Real g_fitU = gt[NS - 1];
+  const Real e1_fitU = pt[1] - pr[1];
+  row(1.0, 7);
+  const Real g_fitUX = gt[NS - 1];
+  const Real e1_fitUX = pt[1] - pr[1];
 
   // What the oracle row establishes: a ghost fill that carries the exact
   // continuation HOLDS the sustained front, in this same truncated domain,
@@ -2126,6 +2227,43 @@ check_sustained_ramp()
   check(
     std::abs(g_mat - g_orc) < 0.5 * std::abs(g_ent - g_orc),
     "extrap_material preserves the structure the oracle preserves", buf);
+
+  // ---- C11x: the profile-fit experiment (reported, not gated) ------------
+  // The question: how much of the oracle's advantage does a FITTED library
+  // profile recover, when it supplies material structure only?  The fraction
+  // below is (e_T - fit) / (e_T - oracle) in the early window -- 1.0 means
+  // the fit is as good as knowing the exact answer, 0.0 means it bought
+  // nothing over linear-in-T ghosts.  fitX is the same fit through a family
+  // whose end state is 15% wrong: the stretch/curvature analogue.
+  {
+    const Real denom = e1_eT - e1_orc;
+    const Real frac =
+      (std::abs(denom) > 1.0e-30) ? (e1_eT - e1_fit) / denom : 0.0;
+    const Real fracX =
+      (std::abs(denom) > 1.0e-30) ? (e1_eT - e1_fitX) / denom : 0.0;
+    std::snprintf(
+      buf, sizeof(buf),
+      "at 0.7 tau: ent %.1f, e_T %.1f, fit %.1f (fitX %.1f), mat %.1f, "
+      "fitU %.1f (fitUX %.1f), oracle %.1f",
+      e1_ent, e1_eT, e1_fit, e1_fitX, e1_mat, e1_fitU, e1_fitUX, e1_orc);
+    report("C11x the ladder from line to oracle", buf);
+    const Real denomU = e1_mat - e1_orc;
+    const Real fracU =
+      (std::abs(denomU) > 1.0e-30) ? (e1_mat - e1_fitU) / denomU : 0.0;
+    std::snprintf(
+      buf, sizeof(buf),
+      "material-only fit recovers %.0f%% of the e_T -> oracle gap (%.0f%% "
+      "with the 15%%-wrong family); with the profile's u, %.0f%% of the "
+      "mat -> oracle gap",
+      100.0 * frac, 100.0 * fracX, 100.0 * fracU);
+    report("C11x profile-fit recovery fractions", buf);
+    std::snprintf(
+      buf, sizeof(buf),
+      "du/dn at t_end: e_T %.0f, fit %.0f, mat %.0f, fitU %.0f (fitUX "
+      "%.0f), oracle %.0f (exact %.0f)",
+      g_eT, g_fit, g_mat, g_fitU, g_fitUX, g_orc, g0);
+    report("C11x structure at the face", buf);
+  }
 }
 
 // C7: the reaction source term.  Chemistry changes the pressure only through
