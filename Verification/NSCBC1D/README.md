@@ -115,10 +115,20 @@ the assumed end state costs 9%, because the value-and-slope match absorbs the
 leading-order deformation — the stretch/curvature argument in miniature. The
 pressure never comes from the profile in any row; it stays the relaxation's.
 
-Untested here, and required before this becomes a PeleC closure: the C10
-failure mode (a fitted continuation must *release* a decaying structure —
-the sustained front cannot probe this), multi-species fitting on a progress
-variable, and a shape-distorted (not merely end-state-distorted) family.
+The release side is measured on C10's decaying ramp (the structure a correct
+boundary must let die; `extrap_material`'s known failure). At t_end, ⟨p⟩
+error: plain kernel **+1477**, `extrap_material` **−20406** (holds the ramp
+alive), profile-fitU **−3499**. So the stateless re-fit releases *partially*
+— 6× softer than `extrap_material`, because the fitted thickness grows as the
+interior slope weakens — but it still over-vents relative to leaving the
+closure off, and the diagnosis is structural: the two-parameter family can
+shift and widen but cannot represent a *shrinking amplitude*, so during the
+decay it keeps imposing full-amplitude structure through weakened data. A
+usable closure needs either an amplitude degree of freedom in the fit or a
+transit/decay gate in front of it.
+
+Still untested: multi-species fitting on a progress variable, and a
+shape-distorted (not merely end-state-distorted) family.
 
 ## Reference results
 

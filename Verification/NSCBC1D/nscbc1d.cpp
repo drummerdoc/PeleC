@@ -1642,16 +1642,79 @@ check_extrapolation_drives_solution()
   // Advance `nc` cells to t_end with a characteristic outflow, sampling the
   // mean pressure over the FIRST n cells (the region the short and the long
   // domain share) and du/dn at the outflow face at NS times.
+  // bmode: 0 = plain kernel fill, 1 = extrap_material, 2 = profile-fitU --
+  // the C11x closure (fit the tanh family's position and thickness to T at
+  // the last two interior cells each fill; overwrite ghost T and u from the
+  // fitted profile, rho from the EOS at the kernel's ghost pressure; p stays
+  // the relaxation's).  Here the family is the run's own initial ramp, but
+  // the STRUCTURE IS DECAYING: the release question is whether the stateless
+  // re-fit lets it go (tracking the weakening interior slope, and bailing to
+  // the plain kernel when the structure is gone) or holds it alive at the
+  // face the way extrap_material measurably does.
   auto run = [&](const int nc, const Real sigma, const int order,
-                 const Real ratio, const bool mat, Real* pm, Real* gr) {
+                 const Real ratio, const int bmode, Real* pm, Real* gr) {
     Field f(nc), g(nc), h(nc);
     init(f, nc, ratio);
+
+    auto fit_ghosts = [&](Field& w) {
+      auto eos2 = pele::physics::PhysicsType::eos();
+      auto T_of_u = [&](const Real u) {
+        const Real rho = mdot / u;
+        const Real p = cs.p0 + mdot * (u0 - u);
+        Real T = 0.0;
+        eos2.RYP2T(rho, Y, p, T);
+        return T;
+      };
+      const Real ua = u0 * (1.0 + 1.0e-9);
+      const Real ub = u0 * ratio * (1.0 - 1.0e-9);
+      auto u_of_T = [&](const Real T) {
+        if (T <= T_of_u(ua)) {
+          return ua;
+        }
+        if (T >= T_of_u(ub)) {
+          return ub;
+        }
+        Real a = ua, b = ub;
+        for (int it = 0; it < 60; it++) {
+          const Real m = 0.5 * (a + b);
+          (T_of_u(m) < T ? a : b) = m;
+        }
+        return 0.5 * (a + b);
+      };
+      const int N = w.n - 1;
+      auto arg = [&](const Real T) {
+        Real gp = (u_of_T(T) / u0 - 1.0) / (ratio - 1.0);
+        gp = std::min(std::max(gp, 1.0e-9), 1.0 - 1.0e-9);
+        return std::atanh(2.0 * gp - 1.0);
+      };
+      const Real aN = arg(get_prim(w.at(N)).T);
+      const Real aM = arg(get_prim(w.at(N - 1)).T);
+      if (!(aN > aM) || !std::isfinite(aN) || !std::isfinite(aM)) {
+        return; // no structure to fit; the kernel's ghosts stand
+      }
+      const Real lam = dx / (aN - aM);
+      const Real sh = (N + 0.5) * dx - lam * aN;
+      for (int layer = 1; layer <= NG; layer++) {
+        const int i = N + layer;
+        const Real x = (i + 0.5) * dx;
+        const Real gg = 0.5 * (1.0 + std::tanh((x - sh) / lam));
+        const Real uf = u0 * (1.0 + (ratio - 1.0) * gg);
+        const Real rf = mdot / uf;
+        const Real pf = cs.p0 + mdot * (u0 - uf);
+        Real Tf = 0.0;
+        eos2.RYP2T(rf, Y, pf, Tf);
+        const Prim qg = get_prim(w.at(i));
+        Real rho_g = 0.0, e_g = 0.0;
+        eos2.PYT2RE(qg.p, Y, Tf, rho_g, e_g);
+        set_state(w.at(i), rho_g, uf, Tf, Y);
+      }
+    };
 
     pc_nscbc::Params prm;
     prm.L_ref = nc * dx;
     prm.sigma = sigma;
     prm.order = order;
-    prm.extrap_material = mat;
+    prm.extrap_material = (bmode == 1);
     pc_nscbc::Target off, out;
     out.type = pc_nscbc::Type::outflow;
     out.p = cs.p0;
@@ -1685,11 +1748,17 @@ check_extrapolation_drives_solution()
           set_state(f.at(-layer), rho0, u0, cs.T0, Y);
         }
         fill_bcs(f, off, out, prm, dx);
+        if (bmode == 2) {
+          fit_ghosts(f);
+        }
         stage(f, g, dx, dt);
         for (int layer = 1; layer <= NG; layer++) {
           set_state(g.at(-layer), rho0, u0, cs.T0, Y);
         }
         fill_bcs(g, off, out, prm, dx);
+        if (bmode == 2) {
+          fit_ghosts(g);
+        }
         stage(g, h, dx, dt);
         for (int i = 0; i < nc; i++) {
           for (int v = 0; v < NVAR; v++) {
@@ -1706,10 +1775,10 @@ check_extrapolation_drives_solution()
   // from the common region: the expanded gas reaches ~1200 K, where c ~ 7e4
   // cm/s, so 20 cm would only just be shielded over t_end and 40 cm is not.
   auto err = [&](const Real sigma, const int order, const Real ratio,
-                 const bool mat, Real* eh, Real* gh, Real* gr) {
+                 const int bmode, Real* eh, Real* gh, Real* gr) {
     Real pr[NS], pt[NS];
-    run(5 * n, sigma, order, ratio, mat, pr, gr);
-    run(n, sigma, order, ratio, mat, pt, gh);
+    run(5 * n, sigma, order, ratio, bmode, pr, gr);
+    run(n, sigma, order, ratio, bmode, pt, gh);
     for (int k = 0; k < NS; k++) {
       eh[k] = pt[k] - pr[k];
     }
@@ -1717,10 +1786,10 @@ check_extrapolation_drives_solution()
 
   Real eh[NS], gh[NS], gr[NS];
   auto row = [&](const Real sigma, const int order, const Real ratio,
-                 const bool mat = false) {
-    err(sigma, order, ratio, mat, eh, gh, gr);
-    std::printf("    %6.2f %6d %6.1f%s", sigma, order, ratio,
-                mat ? " m" : "  ");
+                 const int bmode = 0) {
+    const char* bl[3] = {"  ", " m", " f"};
+    err(sigma, order, ratio, bmode, eh, gh, gr);
+    std::printf("    %6.2f %6d %6.1f%s", sigma, order, ratio, bl[bmode]);
     for (int k = 1; k < NS; k++) {
       std::printf(" %9.1f", eh[k]);
     }
@@ -1777,13 +1846,31 @@ check_extrapolation_drives_solution()
   // ramp is SUSTAINED and the exact answer is to hold it.  What this row
   // establishes is the honest cost: do not leave extrap_material on at a
   // boundary whose structure is transient and should be allowed to die out.
-  const Real e_mat = row(1.0, 2, 4.0, true);
+  const Real e_mat = row(1.0, 2, 4.0, 1);
   std::snprintf(
     buf, sizeof(buf),
     "error at t_end: %.1f without, %.1f with -- the continuation holds a "
     "DECAYING ramp alive at the face",
     e_r4, e_mat);
   report("extrap_material on a decaying (unsustainable) ramp", buf);
+
+  // --- C11x release test: the profile-fit on the same dying ramp ---------
+  // The C11 result (fitU holds a SUSTAINED front at oracle level) is only
+  // half a qualification: extrap_material also helps there and then fails
+  // HERE, holding this unsustainable ramp alive at the face while the
+  // reference lets it die.  A usable structure closure must pass both.  The
+  // hoped-for release mechanism is in the fit itself: value-and-slope
+  // matching tracks the weakening interior gradient (lambda grows as the
+  // ramp dies), and when no monotone structure remains the fit declines and
+  // the plain kernel fill stands.  Reported, not gated.
+  const Real e_fit = row(1.0, 2, 4.0, 2);
+  const Real g_fit_end = gh[NS - 1];
+  std::snprintf(
+    buf, sizeof(buf),
+    "error at t_end: plain %.1f, extrap_material %.1f, profile-fitU %.1f; "
+    "du/dn at face -> %.0f (ref -> %.0f)",
+    e_r4, e_mat, e_fit, g_fit_end, gr[NS - 1]);
+  report("C11x release: the fit on a ramp that must be let go", buf);
 }
 
 // C11: the sustained ramp -- a front crossing the outflow, with an exact
