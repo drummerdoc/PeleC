@@ -19,20 +19,21 @@ structure sitting on the periodic seam, and `bc_nscbc_beta < 1` so the
 transverse stencil is assembled too. Expect a line like
 
 ```
-  NSCBC periodic-wrap check: dir 0 lo, periodic tangential dir 1 -- N image
-  pairs agree to 0 (boundary-row density spread S)
+  NSCBC periodic-seam check: dir 0 lo, periodic tangential dir 1 -- N image
+  pairs agree to 2e-4 (boundary-row density spread S)
 ```
 
-with a mismatch of exactly zero and a spread that is *not* zero. A non-zero
-mismatch aborts. A zero spread means the check passed vacuously and gated
+with a small mismatch — the clamped tangential stencil's measured residual
+under amrex's corner-strip protocol, O(1e-4) — and a spread that is *not*
+zero. The gate aborts only above 1e-3: a broken stencil (a naive wrap
+measures 2e-2 here) fails outright, while the protocol residual passes and
+is *reported*. A zero spread means the check passed vacuously and gated
 nothing, which is what `nscbc-covo.inp` and `nscbc-acoustic.inp` do: their
-states are uniform along the periodic direction near the seam, which is
-precisely why the seam inconsistency survived on this branch until Phase 0.
-The shipped file gates the inflow face; a second run with
-`prob.centre = 1.0 0.0` puts the vortex on the outflow corner and gates that
-face. The file's own header comment explains each choice, and the comment
-above `tang_range` in `Source/BCfill.cpp` explains the band-restricted
-stencil that makes the identity hold under amrex's corner-strip protocol.
+states are uniform along the periodic direction near the seam. The shipped
+file gates the inflow face; a second run with `prob.centre = 1.0 0.0` puts
+the vortex on the outflow corner and gates that face. The stencil-design
+history — clamp vs wrap vs strip-consistent band, and why stability chose
+the clamp — is in the comment above the stencil in `Source/BCfill.cpp`.
 
 ---
 

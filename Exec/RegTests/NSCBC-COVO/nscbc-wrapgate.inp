@@ -3,16 +3,13 @@
 # Not a physics run -- it takes zero steps.  It exists so that
 # PeleC::nscbc_check_periodic_wrap() has something to bite on.
 #
-# The check asserts an identity that needs no reference solution: where a
+# The check measures an identity that needs no reference solution: where a
 # tangential direction is periodic, a characteristic ghost cell and its image
-# one period away must agree to the last bit.  What makes that non-trivial is
-# amrex's corner protocol (StateDataPhysBCFunct): corner ghosts are recomputed
-# on a temporary strip FAB holding only their image band and copied back, so
-# the fill of a seam-adjacent cell happens twice, on two different FABs, and
-# the array is periodic only if the two computations agree.  The fill's
-# band-restricted tangential stencil (see tang_range in BCfill.cpp) is what
-# makes them agree; both the pre-Phase-0 domain clamp and the naive
-# wrap-across-the-seam fail this file.
+# one period away should agree.  amrex's corner protocol (StateDataPhysBCFunct
+# recomputes corner ghosts on a strip FAB holding only their image band) makes
+# exact agreement unattainable for the measured-stable clamped stencil, which
+# leaves an O(1e-4) residual here; the gate reports it and aborts only above
+# 1e-3, which a genuinely broken stencil (a naive wrap: 2e-2) fails.
 #
 # Three things have to be true for the check to discriminate, and all three
 # are arranged here rather than left to luck:
@@ -25,7 +22,7 @@
 #      defect survived every 2-D case on the branch -- Acoustic and PMF are
 #      uniform along their periodic direction and pass vacuously.
 #   3. The variation must sit at the PERIODIC SEAM, not merely somewhere in
-#      the domain, since that is the only place the two fills can differ.  So
+#      the domain, since that is where the residual lives.  So
 #      the vortex is centred on the inflow face at y = 0, straddling the seam.
 #      This gates the INFLOW face; run again with prob.centre = 1.0 0.0 to put
 #      the vortex on the outflow corner and gate the other face.

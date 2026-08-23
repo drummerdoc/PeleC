@@ -7,9 +7,9 @@ Owner: Marc. Repo at `/Users/marcusd/src/PeleC`, fork `origin` = drummerdoc/Pele
 
 ## Read these before touching NSCBC code, in this order
 
-1. `Docs/NSCBC-status-plan-and-curriculum.md` — current status, ranked defects, the five-phase
-   plan, the nine-lesson teaching curriculum. **Start here. It supersedes `RESTART-PROMPT-nscbc.md`
-   where they disagree.**
+1. `RESTART-PROMPT-nscbc.md` — the one-page current state and work queue. **Start here.**
+   (`Docs/NSCBC-status-plan-and-curriculum.md` is the Phase-0-era audit and teaching curriculum;
+   its defect list is executed and its tables pre-date the fixes — historical record plus curriculum.)
 2. `Docs/NSCBC-design-and-literature-review.md` — formulation (Part I), papers (II–IV).
 3. `Source/NSCBC.H` (kernel), `Source/BCfill.cpp` (plumbing, `nscbc_fill`), the READMEs in
    `Exec/RegTests/NSCBC-*` and `Verification/NSCBC1D/README.md` (measured tables and protocols).
@@ -23,19 +23,24 @@ Owner: Marc. Repo at `/Users/marcusd/src/PeleC`, fork `origin` = drummerdoc/Pele
 - Determinism (decomposition, MPI, restart) is bit-identical and must stay so.
 - EB requires `pelec.eb_zero_body_state=1`; AMR face touching an NSCBC face only warns.
 
-## Known defects to fix first (Phase 0 of the plan) — see the status doc §2
+## State (Phase 0 complete; see git log from `1329779` for the record)
 
-- `Source/NSCBC.H:1029`: reaction source must be `L_in += (1-beta_s)*S_p`, not `-=`.
-  Verified convention-free in `Verification/NSCBC1D/source_sign_check.py`. After the flip, re-measure
-  C12, the FlameOutflow/flame-exit tables and COVO before trusting any old number.
-- ~~`Source/BCfill.cpp`: tangential stencil in periodic directions~~ FIXED, but not by wrapping:
-  amrex's corner protocol (`StateDataPhysBCFunct` recomputes corner ghosts on an image-band strip
-  FAB) makes a centred difference across the periodic seam unachievable. The fill restricts its
-  tangential stencil to the strip-consistent band (`tang_range`); the gate is
-  `nscbc_check_periodic_wrap()` + `NSCBC-COVO/nscbc-wrapgate.inp` (both faces bitwise, both
-  decompositions bitwise after 20 steps). Do not "fix" this back to a wrap.
-- Scheme is NOT Motheau's NSCBC-GC (invariant extrapolation, not derivative targets) — fix the sphinx docs.
-- Daviller 2019's σ is half of this code's σ (his 2K vs our K in the wave).
+- The reaction source enters the incoming wave with `+(1-beta_s)*S_p` (Sutherland–Kennedy);
+  gate: `Verification/NSCBC1D/source_sign_check.py`. All beta_s-sensitive tables were re-measured
+  after the fix; READMEs carry only post-fix numbers.
+- Flame-on-boundary recipe: `bc_nscbc_extrap_temperature=1` + `bc_nscbc_beta_s=0` holds
+  hard-outflow accuracy at ANY sigma (sitting) and survives transits at any sigma. sigma=16+beta_s=1
+  is the best absolute anchoring at 28% reflection. Do not stack sigma=16 with beta_s=0.
+- Periodic tangential stencils CLAMP into the domain (the original scheme). Three designs measured:
+  the clamp (stable everywhere; O(1e-4) seam residual under amrex's corner-strip protocol), a wrap
+  through resident images (aperiodic at 2e-2), and a strip-consistent band (bitwise-periodic but
+  destabilises NSCBC-FlameOutflow-DRM at beta<1: NaN in ~150 steps from a two-row stencil change).
+  Stability won. Gate: `nscbc_check_periodic_wrap()` reports the residual, aborts only above 1e-3;
+  exercised by `NSCBC-COVO/nscbc-wrapgate.inp`. Do not rebuild the wrap or the band without a DRM
+  stability result.
+- C11x (driver, reported not gated): a profile-fit ghost closure (fitU + source-consistency bound)
+  holds a sustained front at ~oracle level, releases unsustainable structure, robust to family
+  errors. Candidate for a 2-3D closure; open items listed in `Verification/NSCBC1D/README.md`.
 
 ## Build and run
 

@@ -46,8 +46,13 @@ flow of information along the solution characteristics: the resulting problem is
 off the boundary back into the domain. The remedy is to decompose the boundary state into characteristic waves, take
 the outgoing ones from the interior, and model only the incoming ones. This is the Navier-Stokes Characteristic
 Boundary Condition (NSCBC) strategy of `Poinsot and Lele (1992) JCP
-<https://www.sciencedirect.com/science/article/pii/0021999192900462>`_, in the ghost-cell form of `Motheau et al.
-(2017) AIAA Journal <https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_.
+<https://www.sciencedirect.com/science/article/pii/0021999192900462>`_, implemented as a pure ghost-cell fill. The
+ghost-cell *setting* follows `Motheau et al. (2017) AIAA Journal
+<https://ccse.lbl.gov/people/motheau/Manuscripts_website/2017_AIAA_CFD_Motheau.pdf>`_, but the scheme is not their
+NSCBC-GC: the ghosts here carry extrapolated characteristic *invariants*, with the relaxation applied as a gradient
+increment, rather than imposing LODI derivative targets. On conventions: :math:`\sigma` here is the classical
+Poinsot--Lele one; Daviller et al. (2019) define theirs with a factor-2 difference in the wave amplitude, so their
+recommended values are *half* of the equivalent setting here.
 
 Enable it with::
 
@@ -101,18 +106,20 @@ Both measured optima in ``Exec/RegTests/NSCBC-COVO`` land on that curve.
    1.0 (transverse off)        10.0×                        0.90%
    0.8                         7.3×                         **0.066%**
    0.5                         **3.8×**                     1.08%
-   0.2 (= local Mach)          16.1×                        —
+   0.2                         6.9×                         2.21%
    0.0 (full)                  132×                         2.95%
+   local Mach (pointwise)      16.1×                        —
    ==========================  ==========================  =============================
 
-Note the shape of that curve: too little correction costs a factor of a few, **too much is catastrophic**.
-:math:`\beta` below about 0.3 is worse than having no transverse terms at all, and :math:`\beta = 0` is close to
-unstable. That asymmetry is why the default is 1 rather than the optimum — a wrong :math:`\beta` is far more
-dangerous than an absent one. Start at 0.5 and raise it toward 1 if the boundary is mostly met at grazing
-incidence.
+Note the shape of that curve: too little correction costs a factor of a few, **too much is catastrophic** —
+:math:`\beta = 0` is close to unstable. That asymmetry is why the default is 1 rather than the optimum: a wrong
+:math:`\beta` is far more dangerous than an absent one. Start at 0.5 and raise it toward 1 if the boundary is
+mostly met at grazing incidence.
 
-A negative :math:`\beta` selects the local Mach number, which is the legacy Fortran's convention. The measurements
-do not support it: at M = 0.2 it gives :math:`\beta = 0.2`, on the wrong side of the minimum.
+A negative :math:`\beta` selects the local Mach number *pointwise*, the legacy Fortran convention. The measurements
+do not support it — not because the value lands wrong (a constant 0.2 is better than :math:`\beta = 1`) but because
+the convention varies the correction point-by-point with whatever structure is crossing the boundary, and that
+wobble measures worse than no transverse terms at all.
 
 The reaction source term
 """"""""""""""""""""""""
@@ -138,8 +145,9 @@ because :math:`\sum_k \dot\omega_k = 0` the perturbation already preserves :math
 single extra :math:`(\rho, e, Y) \rightarrow T` solve rather than one per species. The two agree to eight
 significant figures (check C7 in ``Verification/NSCBC1D``).
 
-The correct first response to heat release at an outflow is still to **move the boundary**; this term is for when
-that is not possible. How little it buys you when that is not possible is the subject of the next section.
+The correct first response to heat release at an outflow is still to **move the boundary**; this term, with
+``bc_nscbc_extrap_temperature``, is for when that is not possible. What the pair buys is the subject of the next
+section.
 
 What a front crossing the outflow actually costs
 """"""""""""""""""""""""""""""""""""""""""""""""
@@ -148,51 +156,51 @@ What a front crossing the outflow actually costs
 the boundary is burnt, half is fresh, and the reaction zone lies in the boundary cells at the two crossings. Errors
 below are against a reference whose outflow is 2.4 cm further downstream, outside the domain of dependence of the
 comparison region, so the difference is the outflow's own error. :math:`R` is the acoustic reflection at the same
-:math:`\sigma` from ``Verification/NSCBC1D``.
+:math:`\sigma` from ``Verification/NSCBC1D``; ``eT`` is ``bc_nscbc_extrap_temperature``; all rows
+:math:`\beta = 0.5`, order 2. (Full matrix and protocol: the case README.)
 
 .. table::
 
-   ==============================  ==========  ==========  =============  ==========
-   Outflow                         :math:`\sigma`  :math:`\beta_s`  mean :math:`\Delta p`  :math:`R` [%]
-   ==============================  ==========  ==========  =============  ==========
-   hard ``p = p_amb``              --          --          --527          --
-   characteristic                  0.25        0           +2185          0.76
-   characteristic                  1           1           +2065          2.56
-   characteristic                  1           0           +2074          2.56
-   characteristic                  4           0           +1450          7.20
-   characteristic                  16          0           **+218**       28.1
-   ``pin_farfield``                --          0           +748           0.015
-   ==============================  ==========  ==========  =============  ==========
+   ==============================  ==============  ======  ================  =====================  =============
+   Outflow                         :math:`\sigma`   ``eT``  :math:`\beta_s`   mean :math:`\Delta p`   :math:`R` [%]
+   ==============================  ==============  ======  ================  =====================  =============
+   hard ``p = p_amb``              --              --      --                --527                  --
+   characteristic                  0.25            0       1                 +2195                  0.76
+   characteristic                  0.25            1       0                 **--507**              0.76
+   characteristic                  1               0       1                 +2062                  2.56
+   characteristic                  1               1       0                 --522                  2.56
+   characteristic                  16              0       1                 **+49**                28.1
+   characteristic                  16              1       0                 --511                  28.1
+   ==============================  ==============  ======  ================  =====================  =============
 
-in dyn/cm\ :sup:`2`, against :math:`p_{\rm amb} = 1.013\times10^6`. Three conclusions, none of them comfortable.
+in dyn/cm\ :sup:`2`, against :math:`p_{\rm amb} = 1.013\times10^6`. What the table says:
 
-**The reaction source term is not what matters here.** :math:`\beta_s` moves the error by under 1%, and the whole
-error is still present with ``pelec.do_react = 0``. The dominant mechanism is the ghost pressure. Per ghost layer
-:math:`\ell`,
+**The closures, together, remove the** :math:`\sigma` **-dependence.** With ``extrap_temperature = 1`` and
+:math:`\beta_s = 0` the error sits at the hard-outflow level at *every* :math:`\sigma` measured — so the boundary
+can be run nearly transparent (:math:`\sigma = 0.25`, R = 0.76%) and still anchor as well as a hard Dirichlet. The
+ghosts carry the diffusive dp/dt (``eT``) and the incoming wave carries the chemical one (:math:`\beta_s = 0`), and
+what remains no longer scales with the relaxation.
+
+**With the closures off,** :math:`\sigma` **is the only defence,** and behaves as the ghost-pressure-bias formula
+predicts. Per ghost layer :math:`\ell`,
 
 .. math::
 
    p_g - p_N = \underbrace{\tfrac{1}{2}\rho c\, \ell\, \delta R_+}_{\rm extrapolation}
              - \underbrace{\frac{\ell\,\sigma}{2 n_x}\,(p_N - p_\infty)}_{\rm anchoring} ,
 
-and the anchoring increment carries a factor :math:`1/n_x` that the extrapolation term does not. Balancing them,
+whose balance gives :math:`\Delta p \approx \rho c L_{\rm ref} (\partial u_{\rm out}/\partial n)_b / \sigma`: a
+**normal velocity gradient** at the boundary biases the ghost pressure, the offset is grid-converged rather than
+refining away (:math:`n_x` = 48, 96, 192 give +531, +409, +371), and roughly half of it exists with chemistry off
+entirely — it is dilatational, not acoustic, and LODI cannot tell the two apart.
 
-.. math::
+**Do not stack full relaxation and the full source.** At :math:`\sigma = 16` the relaxation already absorbs the
+chemical offset and :math:`\beta_s = 0` overshoots past the mark; :math:`\sigma = 16` with :math:`\beta_s = 1`
+remains the best absolute error, at the known 28% reflection.
 
-   \Delta p \;\approx\; \rho\, c\, L_{\rm ref} \left. \frac{\partial u_{\rm out}}{\partial n}\right|_{b} \Big/ \sigma .
-
-A **normal velocity gradient** at the boundary biases the ghost pressure, and :math:`\sigma` is the only thing
-fighting it. A flame crossing the outflow is a large such gradient — the gas accelerates from 45.6 to 123.8 cm/s
-across 0.07 cm — and it is dilatational, not acoustic, so the invariant algebra is not at fault: LODI has no way to
-tell the two apart. The formula predicts the measured :math:`\sigma^{-1}` trend, and predicts that the offset is
-grid-*converged* rather than refining away, which it is (:math:`n_x` = 48, 96, 192 give +531, +409, +371).
-
-**The inert default of** :math:`\sigma = 0.25` **is the worst available choice** in this situation, and only around
-:math:`\sigma \approx 10` does the characteristic outflow beat a hard pressure outflow — at roughly 20% acoustic
-reflection. You are choosing which error to have, not removing one.
-
-**``order = 2`` is load-bearing, not a refinement.** First order flips the sign and gives an error seven times
-larger than :math:`\sigma = 16`: extrapolating the outgoing invariant is what lets the front's structure leave.
+**``order = 2`` is load-bearing, not a refinement.** First order drops the outgoing invariant's slope and gives an
+error several times larger, with the opposite sign: extrapolating :math:`R_+` is what lets the front's structure
+leave.
 
 What is specified, and what is not
 """"""""""""""""""""""""""""""""""
@@ -292,10 +300,10 @@ extrapolated density and the acoustically-set pressure — chosen by nothing tha
 density from the EOS, so the face gradient is the interior one exactly, at no cost on the hyperbolic side (a uniform
 state is still reproduced to round-off).
 
-It is off by default because it changes every outflow result. Turn it on when a thermal or compositional structure is
-near the boundary. In ``Exec/RegTests/NSCBC-FlameOutflow`` it is worth 9% at :math:`\sigma = 1`, where the ghost-pressure
-bias still dominates, and 69% at :math:`\sigma = 16`, where that bias is suppressed and the diffusive error is most of
-what remains — taking the mean-pressure error to 67 dyn/cm², eight times *better* than a hard pressure outflow.
+It is off by default because it changes every outflow result. Turn it on when a thermal or compositional structure
+is near the boundary: it is one half of the closure pair (with :math:`\beta_s = 0`) that holds a flame-loaded
+outflow at hard-Dirichlet accuracy at any :math:`\sigma`, and it is the flag that lets a flame *survive* crossing
+the outflow at all — see the flame table above and the exit section below.
 
 ``bc_nscbc_extrap_material`` attacks the ghost-pressure bias itself rather than out-relaxing it. The default outflow
 extrapolates the outgoing invariant :math:`R_+` with its full interior slope while the incoming :math:`R_-` carries only
@@ -313,11 +321,10 @@ steady solution straddling the outflow: the entropy closure drifts by :math:`157
 equilibrates and distorts :math:`\partial u/\partial n` at the face to 175% of its exact value; with this flag the drift
 is :math:`3175` and the face gradient stays within the band a ghost fill of the *exact* continuation also occupies.
 
-Measured in ``Exec/RegTests/NSCBC-FlameOutflow`` (quasi-frozen front on the outflow, :math:`\sigma = 1`): 5% alone —
-which settles the open question from the C9/C10 commits: the extrapolation bias is real and exactly reproducible, but it
-is **not** what dominates a reacting front-crossing outflow, whose residual points at the unmodelled diffusive and
-reactive enthalpy deposition in the boundary cells. Combined with ``bc_nscbc_extrap_temperature``, however, the two
-closures compound to **42%** — together they make the ghost a fully consistent material continuation.
+Measured in ``Exec/RegTests/NSCBC-FlameOutflow`` (quasi-frozen front on the outflow, :math:`\sigma = 1`): a few
+percent alone — the extrapolation bias is real and exactly reproducible, but it is not what dominates a reacting
+front-crossing outflow — and substantially more combined with ``bc_nscbc_extrap_temperature``, with which it makes
+the ghost a fully consistent material continuation (numbers in the case README).
 
 Its sharp edge is a front that *leaves*. The continuation is a quasi-steady model, and during a fast transit at small
 :math:`\sigma` it turns the crossing into a runaway (see *A structure leaving through the outflow* below): use it for
@@ -327,25 +334,25 @@ anchoring — and prefer it off, or paired with a large :math:`\sigma`, when str
 A structure leaving through the outflow
 """""""""""""""""""""""""""""""""""""""
 
-``Exec/RegTests/NSCBC-FlameOutflow`` (``nscbc-flameexit.inp``) measures a wrinkled flame sheet *actually leaving* at
-U = 40 :math:`S_L`, with the passage complete inside the run and the post-exit truth known exactly (a uniform fresh
-stream). The result inverts the acoustic intuition this page is otherwise built on:
+``Exec/RegTests/NSCBC-FlameOutflow`` (``nscbc-flameexit.inp``) measures a wrinkled flame sheet *actually leaving*
+at U = 40 :math:`S_L`, with the passage complete inside the run and the post-exit truth known exactly (a uniform
+fresh stream). What crosses is a dilatational event — mass and enthalpy at low Mach, with the reaction zone in the
+boundary cells — and the closures are what carry it:
 
-* A fast dilatational transit wants **anchoring, not transparency**. What crosses is mass and enthalpy at low Mach,
-  with essentially no acoustic content, and every treatment ranks by anchoring strength: the hard Dirichlet is
-  near-perfect; :math:`\sigma = 16` + ``extrap_temperature`` exits the flame with front kinematics and wrinkle
-  amplitude indistinguishable from it (transient 0.18% of ambient, final state exact to 8 ppm) — and the ~28% acoustic
-  reflection that :math:`\sigma = 16` costs elsewhere never appears, because nothing acoustic is present.
-* The inert default :math:`\sigma = 0.25` is **unstable** for a transit: the anchoring time is comparable to the
-  crossing, the flux imbalance integrates into a pressure ramp that pushes the front back upstream, pumps the wrinkle,
-  and the run dies. Raise :math:`\sigma` to O(10) *before* a front reaches the outflow.
-* ``pin_farfield`` is stable but anchors a through-flow duct to :math:`p + \rho c u` — the operating point shifts and
-  stays shifted. Reservoir boundaries only.
-That is simultaneously non-reflecting and anchored, which a rate-based relaxation cannot be, but it anchors to
-:math:`p_{\rm target} + \rho c u_n` rather than to :math:`p_{\rm target}`, and because it constrains a *value*
-rather than a rate its effective relaxation rate is :math:`c/\Delta x` and it does not converge under mesh
-refinement. Use it for an open boundary onto a large quiescent reservoir; do not use it for a duct exhausting into
-a plenum whose true mean pressure is not the target.
+* **With** ``extrap_temperature = 1`` **and** :math:`\beta_s = 0` **the front crosses on schedule at every**
+  :math:`\sigma` **measured** (0.25, 1, 16), and the transit disturbance falls 7–10× against :math:`\beta_s = 1` at
+  the same :math:`\sigma`. At :math:`\sigma = 16` the characteristic boundary is quieter during the crossing than
+  the hard Dirichlet.
+* ``extrap_temperature`` is the *survival* flag and :math:`\beta_s` the *fidelity* flag: without ``eT`` the run
+  dies with either :math:`\beta_s` (the boundary's diffusive fluxes are wrong through the whole transit); with
+  ``eT`` but :math:`\beta_s = 1` at :math:`\sigma = 0.25` the run survives while the physics fails — the pressure
+  ramp stalls the front and pushes it back upstream.
+* **Post-exit residuals are** :math:`\sigma` **'s alone** (+133 at :math:`\sigma = 1`, +8.5 at 16, −253 recovering
+  at 0.25, dyn/cm²): once the flame is gone there is no chemistry at the boundary for :math:`\beta_s` to model, and
+  the emptied domain returns to ambient at the relaxation rate.
+* ``extrap_material`` is for fronts that *sit*, not fronts that leave: its quasi-steady continuation over-vents a
+  transit. ``pin_farfield`` anchors a through-flow duct to :math:`p + \rho c u` — the operating point shifts and
+  stays shifted; reservoir boundaries only.
 
 Providing a target
 """"""""""""""""""
@@ -396,9 +403,10 @@ Where to put the boundary
 
 The quality of a characteristic boundary condition is set more by where the boundary is than by the dials.
 
-* Put a subsonic outflow at least one acoustic wavelength of the lowest frequency of interest, and roughly ten flame
-  thicknesses, downstream of any reaction zone. The modelled incoming wave carries no reaction-source term, so heat
-  release in the boundary cell shows up as a mean pressure offset that :math:`\sigma` must absorb.
+* Put a subsonic outflow at least one acoustic wavelength of the lowest frequency of interest, and roughly ten
+  flame thicknesses, downstream of any reaction zone. When that is impossible, turn on the flame closures
+  (``extrap_temperature = 1``, :math:`\beta_s = 0`) — measured above, they hold the boundary at hard-outflow
+  accuracy without giving up transparency.
 * Avoid placing an outflow across a strong shear layer, a vortex core or a composition front. The acoustic impedance
   :math:`\rho c` is frozen at the boundary cell, and that linearisation is weakest exactly there. More to the point,
   the mean-pressure error scales as :math:`\rho c L_{\rm ref} (\partial u_{\rm out}/\partial n) / \sigma` and does
@@ -431,20 +439,14 @@ when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
    Mean pressure drifts over a long run             Increase :math:`\sigma` so :math:`\tau_{\rm relax}` is
                                                     well below the run time; or move the outflow away from
                                                     the flame.
-   Reflects *and* drifts                            The boundary is sitting on a flame or shear layer. No
-                                                    dial fixes this; move it. If you cannot, raise
-                                                    :math:`\sigma` to O(10) and accept the reflection, or
-                                                    use ``pin_farfield`` and accept a fixed offset of order
-                                                    :math:`\rho c\, u_{\rm out}`.
-   A flame or front must pass OUT through the       Raise :math:`\sigma` to O(10) and set
-   outflow                                          ``extrap_temperature = 1`` before it arrives. The
-                                                    default :math:`\sigma = 0.25` can push the front back
-                                                    and crash the run; ``extrap_material`` off during the
-                                                    transit. See *A structure leaving through the outflow*.
-   Mean pressure off target at a reacting outflow,  Expected. :math:`\beta_s` is a second-order correction
-   and ``beta_s`` does not help                     on top of a first-order problem; the error is driven by
-                                                    :math:`\partial u_{\rm out}/\partial n`, not by the heat
-                                                    release. Raise :math:`\sigma`.
+   Reflects *and* drifts                            The boundary is sitting on a flame or shear layer.
+                                                    Move it if you can; otherwise set
+                                                    ``extrap_temperature = 1`` and ``beta_s = 0``, which
+                                                    hold hard-outflow accuracy at any :math:`\sigma`.
+   A flame or front must pass OUT through the       Set ``extrap_temperature = 1`` and ``beta_s = 0``
+   outflow                                          before it arrives (any :math:`\sigma` then survives);
+                                                    keep ``extrap_material`` off during the transit. See
+                                                    *A structure leaving through the outflow*.
    Reflection persists at any :math:`\sigma`, 2-D    Missing transverse terms. Move the boundary further out.
    Inflow never reaches the target velocity         Increase ``relax_u``.
    Inflow oscillates or goes unstable               Reduce ``relax_u``; a value much above 10 is a hard
@@ -457,11 +459,10 @@ when ``pelec.v > 0``. A silent fallback is a bug that will not be found.
    ``flow reversal`` count sustained above zero     The outflow is misplaced, or the face should be an
                                                     inflow. Transient counts are benign.
    ``material structure`` advisory printed          A front, flame or density gradient is sitting in the
-                                                    outflow boundary cells (|dS| > 5% of ρ per cell). If it
-                                                    is about to CROSS, raise :math:`\sigma` to O(10) first —
-                                                    the 0.25 default can push the front back and abort the
-                                                    run — and keep ``extrap_material`` off during the
-                                                    transit.
+                                                    outflow boundary cells (|dS| > 5% of ρ per cell). Turn
+                                                    on the flame closures (``extrap_temperature = 1``,
+                                                    ``beta_s = 0``); keep ``extrap_material`` off if it is
+                                                    about to cross.
    ``EB body state`` count above zero               Covered cells are adjacent to the boundary face; the
                                                     stencil order was degraded to avoid them.
    ===============================================  ==========================================================
