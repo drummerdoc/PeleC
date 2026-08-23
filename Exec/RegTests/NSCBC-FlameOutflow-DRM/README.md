@@ -66,45 +66,58 @@ about: its expansion ratio is 6.42 against 4.4, so ∂u/∂n through the front i
 The formula therefore **predicts a 1.82× larger error at the same σ**, before
 the run is made.
 
-Measured, at t = 1.5×10⁻⁵ s, mean Δp against each case's own shielded reference:
+Measured, at t = 1.5×10⁻⁵ s, mean Δp against each case's own shielded
+reference (rows with the reaction source *off*, which the Phase-0 sign fix
+does not touch; the β_s = 0 rows of the original table were measurements of
+the inverted sign and are superseded below):
 
 | outflow | σ | β | β_s | H₂ | CH₄ | ratio |
 |---|---|---|---|---|---|---|
 | hard `p = p_amb` | — | — | — | −507 | −776 | 1.53 |
 | characteristic | 1 | 1 | 1 | +1667 | +2831 | **1.70** |
 | characteristic | 1 | 0.5 | 1 | +1375 | +2253 | **1.64** |
-| characteristic | 1 | 0.5 | 0 | +1503 | +2492 | **1.66** |
-| characteristic | 4 | 0.5 | 0 | +1118 | +1540 | 1.38 |
-| characteristic | 16 | 0.5 | 0 | +234 | +171 | 0.73 |
 
-**1.65 measured against 1.82 predicted**, across three independent σ = 1
-settings. The prediction was made from the flame's expansion ratio and thickness
-alone, with no fitted quantity. The two entries that fall off it are the ones
-the formula does not claim: at σ = 16 the anchoring dominates the bias, which is
-the whole point of raising σ, so the residual there is set by something else.
+**1.65 measured against 1.82 predicted**, with no fitted quantity — the
+prediction is from the flame's expansion ratio and thickness alone. The
+CH₄ σ = 1, β = 0.5, β_s = 1 row has since been re-measured on a different
+machine, toolchain and build system: +2253.3, the same number to the digit.
 
 ## What it says about β_s, more strongly than the H₂ case did
 
 CH₄/air puts **3.5× more heat release in the boundary cells** than H₂/air does —
 peak `q` along the outflow column is 2.1×10¹⁰ against 6.0×10⁹ erg/cm³/s. If the
-reaction-source correction were the answer to a flame on an outflow, this is
-where it would show.
+reaction-source correction works, this is where it should show hardest.
 
-It is not. Turning it on (`β_s` 1 → 0, at β = 0.5) moves the error from **+2253
-to +2492 — 11% worse**. In the H₂ case the same change was worth 0.4%, also in
-the wrong direction.
+It does. At σ = 1, β = 0.5, t = 1.5×10⁻⁵ s, mean Δp against the shielded
+reference:
 
-This is not a sign error and not a silent failure; the diagnostics report
-`reaction source dropped 0`. The term does exactly what it is designed to do: it
-removes the relaxation's response to pressure the boundary cell generated
-locally, so that the boundary does not spuriously damp it. In a configuration
-where the relaxation is *already too weak* to fight a larger error of a different
-origin, removing more of it makes things worse. `β_s` is correctly implemented
-and counterproductive here, and the two statements are compatible.
+| configuration | CH₄ |
+|---|---|
+| β_s = 1 (source off) | +2253 |
+| β_s = 0 (source on) | **+873** |
+| β_s = 0 + `extrap_temperature` | **−547** |
+| hard `p = p_amb` | −776 |
+
+Turning the corrected source on cuts the error 2.6× (the H₂ case measures
+2.0×), and the closure pair — the ghosts carrying the diffusive dp/dt, the
+incoming wave carrying the chemical one — lands at the hard-outflow level,
+exactly as in the parent case. The stronger the heat release, the more the
+term is worth, which is what a correctly-signed Sutherland–Kennedy
+cancellation must do.
 
 `β = 0.5` is worth more in CH₄ than in H₂ — 20% against 10% — which is
 consistent: the stronger dilatation makes the tangential structure at the
 boundary stronger too.
+
+## Build note
+
+The GNUmakefile in this directory shipped with the parent case's
+`Chemistry_Model := LiDryer` until the 2026-08 survey — every measurement
+above was made through CMake, which always set `drm19`, and the GNUmake path
+had never been exercised. A LiDryer build of this case reads the 21-species
+datafile into 9-species chemistry and produces a garbage initial state
+(mean molecular weight ≈ 1) that runs stably enough to look like physics.
+If a DRM number ever looks alien, check the plotfile's species list first.
 
 ## The boundary column
 

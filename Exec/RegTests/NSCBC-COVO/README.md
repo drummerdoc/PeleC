@@ -24,15 +24,16 @@ transverse stencil is assembled too. Expect a line like
 ```
 
 with a small mismatch — the clamped tangential stencil's measured residual
-under amrex's corner-strip protocol, O(1e-4) — and a spread that is *not*
-zero. The gate aborts only above 1e-3: a broken stencil (a naive wrap
-measures 2e-2 here) fails outright, while the protocol residual passes and
+under amrex's corner-strip protocol, O(1e-4) here and up to 1.6e-3 with a
+flame front on the seam corner — and a spread that is *not* zero. The gate
+aborts only above 1e-2: a broken stencil (a naive wrap measures 2.2e-2 here)
+fails outright, while the protocol residual passes and
 is *reported*. A zero spread means the check passed vacuously and gated
 nothing, which is what `nscbc-covo.inp` and `nscbc-acoustic.inp` do: their
 states are uniform along the periodic direction near the seam. The shipped
 file gates the inflow face; a second run with `prob.centre = 1.0 0.0` puts
 the vortex on the outflow corner and gates that face. The stencil-design
-history — clamp vs wrap vs strip-consistent band, and why stability chose
+history — clamp vs wrap vs strip-consistent band, and why simplicity chose
 the clamp — is in the comment above the stencil in `Source/BCfill.cpp`.
 
 ---

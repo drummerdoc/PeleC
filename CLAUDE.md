@@ -32,12 +32,13 @@ Owner: Marc. Repo at `/Users/marcusd/src/PeleC`, fork `origin` = drummerdoc/Pele
   hard-outflow accuracy at ANY sigma (sitting) and survives transits at any sigma. sigma=16+beta_s=1
   is the best absolute anchoring at 28% reflection. Do not stack sigma=16 with beta_s=0.
 - Periodic tangential stencils CLAMP into the domain (the original scheme). Three designs measured:
-  the clamp (stable everywhere; O(1e-4) seam residual under amrex's corner-strip protocol), a wrap
-  through resident images (aperiodic at 2e-2), and a strip-consistent band (bitwise-periodic but
-  destabilises NSCBC-FlameOutflow-DRM at beta<1: NaN in ~150 steps from a two-row stencil change).
-  Stability won. Gate: `nscbc_check_periodic_wrap()` reports the residual, aborts only above 1e-3;
-  exercised by `NSCBC-COVO/nscbc-wrapgate.inp`. Do not rebuild the wrap or the band without a DRM
-  stability result.
+  the clamp (simple; seam residual 2e-4 inert / 1.6e-3 flame-on-seam under amrex's corner-strip
+  protocol), a wrap through resident images (aperiodic at 2e-2 — rejected), and a strip-consistent
+  band (bitwise-periodic, equally stable on real DRM — rejected as ~100 lines of index machinery
+  buying only the residual). An apparent band-induced DRM instability during the survey was an
+  artifact: the DRM GNUmakefile carried the parent's LiDryer mechanism (CMake had drm19), so those
+  runs fed the drm19 datafile into LiDryer chemistry. Gate: `nscbc_check_periodic_wrap()` reports
+  the residual, aborts above 1e-2; exercised by `NSCBC-COVO/nscbc-wrapgate.inp`.
 - C11x (driver, reported not gated): a profile-fit ghost closure (fitU + source-consistency bound)
   holds a sustained front at ~oracle level, releases unsustainable structure, robust to family
   errors. Candidate for a 2-3D closure; open items listed in `Verification/NSCBC1D/README.md`.

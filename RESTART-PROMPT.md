@@ -28,10 +28,9 @@ full reasoning — the commit messages are the lab notebook.
 * Flame-on-boundary recipe: `bc_nscbc_extrap_temperature=1` + `bc_nscbc_beta_s=0` — holds
   hard-outflow accuracy at any sigma sitting, survives transits at any sigma. `sigma=16` +
   `beta_s=1` is best absolute anchoring at 28% reflection; do not stack sigma=16 with beta_s=0.
-* Periodic tangential stencils CLAMP into the domain. Wrap and strip-band designs were built
-  and rejected (aperiodicity 2e-2 / DRM instability); the seam gate reports the O(1e-4)
-  protocol residual and aborts above 1e-3. Neither alternative returns without a
-  NSCBC-FlameOutflow-DRM beta=0.5 stability run.
+* Periodic tangential stencils CLAMP into the domain. Wrap (aperiodic, 2e-2) and strip-band
+  (bitwise but ~100 lines of machinery for a 2e-4..1.6e-3 residual) were built and rejected;
+  the seam gate reports the residual and aborts above 1e-2.
 * beta: 1 default (safe), 0.5 optimum for broad structures leaving, beta=0 near-unstable,
   pointwise local-Mach worse than off. beta_opt(theta) = 1 − cos/(1+cos).
 * `extrap_material` is for fronts that SIT, never during a transit.

@@ -29,7 +29,7 @@ PELE_USE_MAGMA = FALSE
 PELE_COMPILE_AJACOBIAN = FALSE
 USE_MASA = FALSE
 Eos_Model := Fuego
-Chemistry_Model := LiDryer
+Chemistry_Model := drm19
 Transport_Model := Simple
 
 # GNU Make

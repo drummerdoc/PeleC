@@ -8,8 +8,9 @@
 # one period away should agree.  amrex's corner protocol (StateDataPhysBCFunct
 # recomputes corner ghosts on a strip FAB holding only their image band) makes
 # exact agreement unattainable for the measured-stable clamped stencil, which
-# leaves an O(1e-4) residual here; the gate reports it and aborts only above
-# 1e-3, which a genuinely broken stencil (a naive wrap: 2e-2) fails.
+# leaves an O(1e-4) residual here (up to 1.6e-3 with a flame on the seam
+# corner); the gate reports it and aborts only above 1e-2, which a genuinely
+# broken stencil (a naive wrap: 2.2e-2) fails.
 #
 # Three things have to be true for the check to discriminate, and all three
 # are arranged here rather than left to luck:

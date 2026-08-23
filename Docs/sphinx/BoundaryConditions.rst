@@ -165,9 +165,9 @@ comparison region, so the difference is the outflow's own error. :math:`R` is th
    Outflow                         :math:`\sigma`   ``eT``  :math:`\beta_s`   mean :math:`\Delta p`   :math:`R` [%]
    ==============================  ==============  ======  ================  =====================  =============
    hard ``p = p_amb``              --              --      --                --527                  --
-   characteristic                  0.25            0       1                 +2195                  0.76
+   characteristic                  0.25            0       1                 +2193                  0.76
    characteristic                  0.25            1       0                 **--507**              0.76
-   characteristic                  1               0       1                 +2062                  2.56
+   characteristic                  1               0       1                 +2065                  2.56
    characteristic                  1               1       0                 --522                  2.56
    characteristic                  16              0       1                 **+49**                28.1
    characteristic                  16              1       0                 --511                  28.1

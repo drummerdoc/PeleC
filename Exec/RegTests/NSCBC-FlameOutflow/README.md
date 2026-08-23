@@ -68,22 +68,22 @@ Errors against the shielded reference at t = 2.4×10⁻⁵ s (≈ 3.4 τ_relax a
 acoustic reflection at the same σ from `Verification/NSCBC1D`. All
 characteristic rows: β = 0.5, order 2, hard-Dirichlet inlet. `eT` is
 `bc_nscbc_extrap_temperature`. Measured after the Phase-0 reaction-source sign
-fix (`NSCBC.H`, `L_in += (1−β_s) S_p`); the pre-fix table is in the git
-history, and the one configuration the fix does not touch reproduces it —
-σ = 1, eT = 0, β_s = 1 was +2065 before and is +2062 now, the 0.15% being the
-Phase-0 periodic-seam stencil change.
+fix (`NSCBC.H`, `L_in += (1−β_s) S_p`), with the shipped (clamped) tangential
+stencil; the pre-fix table is in the git history, and the one configuration
+the fix does not touch reproduces it — σ = 1, eT = 0, β_s = 1 reads +2065
+before and after.
 
 | outflow | σ | eT | β_s | mean Δp | L2(Δp) | L2(Δp) bl | R [%] |
 |---|---|---|---|---|---|---|---|
 | hard `p = p_amb` | — | — | — | −527 | 586 | 631 | — |
-| characteristic | 0.25 | 0 | 1 | +2195 | 2217 | 2208 | 0.76 |
-| characteristic | 0.25 | 0 | 0 | +1465 | 1508 | 1724 | 0.76 |
-| characteristic | 0.25 | 1 | 1 | +2026 | 2052 | 2142 | 0.76 |
-| **characteristic** | **0.25** | **1** | **0** | **−507** | **569** | **639** | **0.76** |
-| characteristic | 1 | 0 | 1 | +2062 | 2084 | 2133 | 2.56 |
-| characteristic | 1 | 0 | 0 | +1089 | 1128 | 1224 | 2.56 |
-| characteristic | 1 | 1 | 1 | +1773 | 1801 | 1883 | 2.56 |
-| characteristic | 1 | 1 | 0 | −522 | 582 | 647 | 2.56 |
+| characteristic | 0.25 | 0 | 1 | +2193 | 2214 | 2202 | 0.76 |
+| characteristic | 0.25 | 0 | 0 | +1467 | 1510 | 1729 | 0.76 |
+| characteristic | 0.25 | 1 | 1 | +2026 | 2052 | 2141 | 0.76 |
+| **characteristic** | **0.25** | **1** | **0** | **−507** | **568** | **638** | **0.76** |
+| characteristic | 1 | 0 | 1 | +2065 | 2088 | 2136 | 2.56 |
+| characteristic | 1 | 0 | 0 | +1089 | 1128 | 1225 | 2.56 |
+| characteristic | 1 | 1 | 1 | +1772 | 1799 | 1886 | 2.56 |
+| characteristic | 1 | 1 | 0 | −522 | 582 | 646 | 2.56 |
 | characteristic | 16 | 0 | 1 | +49 | 256 | 135 | 28.1 |
 | characteristic | 16 | 0 | 0 | −281 | 377 | 394 | 28.1 |
 | **characteristic** | **16** | **1** | **1** | **−139** | **286** | **270** | **28.1** |
@@ -98,7 +98,7 @@ What the corrected table says, in order of importance.
 
 **β_s = 0 now earns its keep, and the old table was measuring the bug.** With
 the sign corrected, switching the reaction source on cuts the error by a third
-at σ = 0.25 (2195 → 1465) and by half at σ = 1 (2062 → 1089). Under the old
+at σ = 0.25 (2193 → 1467) and by half at σ = 1 (2065 → 1089). Under the old
 sign the same switch did nothing (+2065 → +2074), because it was *doubling*
 the heat-release push and the visible residue was only the difference between
 2 S_p/K and the σ-dominated rest. The Sutherland–Kennedy cancellation this
@@ -145,7 +145,7 @@ At σ = 1 (t = 10⁻⁵ s, domain-mean pressure rise):
 
 **Half the error is there with chemistry switched off.** A purely non-reacting
 density front already biases the boundary; reactions roughly double it. That
-is why β_s = 0 alone halves the σ = 1 error rather than removing it (2062 →
+is why β_s = 0 alone halves the σ = 1 error rather than removing it (2065 →
 1089 in the table above), and why extrap_temperature — the closure that lets
 the ghosts carry the front's diffusive structure — is the other half of the
 recipe.
@@ -183,7 +183,7 @@ tell the two apart.
 
 Two checks that the formula is the right one rather than a plausible story:
 
-* It predicts a σ⁻¹ trend. Measured (β_s = 1, eT = 0): 2062 → 256 for
+* It predicts a σ⁻¹ trend. Measured (β_s = 1, eT = 0): 2065 → 256 for
   σ = 1 → 16, and 2074 → 1450 → 218 for σ = 1 → 4 → 16 in the pre-fix table,
   whose β_s = 0 rows differ from β_s = 1 by under 1%.
 * It predicts the offset is **grid-converged**, because δR₊ is a per-cell slope
@@ -283,7 +283,7 @@ follows from the EOS — so the face gradient is the interior one, exactly. A
 uniform state still comes back to 2×10⁻¹⁶, so nothing hyperbolic is given up.
 
 Its measured effect is in the main matrix above: at β_s = 1 it buys 14% at
-σ = 1 (2062 → 1773) and trades mean for near-boundary structure at σ = 16
+σ = 1 (2065 → 1772) and trades mean for near-boundary structure at σ = 16
 (+49 → −139 mean, but L2(dT) in the boundary layer 4.6 → 2.7); combined with
 the corrected β_s = 0 it is half of the closure pair that removes the
 σ-dependence outright. (An earlier version of this section quoted −69% at
@@ -354,23 +354,24 @@ fresh stream at (U, p_amb, T_in). `exit_metrics.py` tracks both.
 
 All characteristic rows below: β = 0.5, order 2, `extrap_temperature = 1`
 unless marked bare, `extrap_material = 0` (its transit behaviour is settled
-below and did not change). Re-measured after the Phase-0 sign fix; the old
-table's characteristic rows all carried `beta_s = 0` under the inverted sign —
-a doubled reaction source — and are superseded. The two controls reproduce:
-hard was (−200, +1.2, 0.01) and reads (−147/−203, +1.2, 0.01); σ = 16 + eT
-ends at +8.5, 0.19 against +8.5, 0.20 before.
+below and did not change). Re-measured after the Phase-0 sign fix, with the
+shipped (clamped) tangential stencil; the old table's characteristic rows all
+carried `beta_s = 0` under the inverted sign — a doubled reaction source —
+and are superseded. The two controls reproduce: hard was (−200, +1.2, 0.01)
+and reads (−147/−203, +1.2, 0.01); σ = 16 + eT ends at +8.5, 0.19 against
++8.5, 0.20 before.
 
 | outflow | transit peak Δp | post-exit extreme | front | post-exit residual Δp, rms(u−U) |
 |---|---|---|---|---|
 | hard `p = p_amb` | −147 | −203 | on schedule | **+1.2, 0.01** |
-| σ = 16, β_s = 1 | +850 | +515 | on schedule | **+8.5, 0.19** |
-| **σ = 16, β_s = 0** | **−114** | −433 | on schedule | +8.6, 0.19 |
-| σ = 1, β_s = 1 | +9131 | +15827 | slightly late | +133, 3.5 |
-| σ = 1, β_s = 0 | −1255 | −4716 | on schedule | +133, 3.5 |
-| σ = 0.25, β_s = 1 | +24712 | +40082, climbing | **BLOCKED: stalls, pushed back** | never exits |
-| σ = 0.25, β_s = 0 | +2461 | −8864, recovering | on schedule | −253, 6.7 |
-| σ = 0.25 bare (eT = 0), β_s = 1 | +36582 | — | pushed backwards | **NaN at t = 1.9×10⁻⁴** |
-| σ = 0.25 bare (eT = 0), β_s = 0 | +34527 | — | exits, slow, wrinkle destroyed | **NaN at t = 4.1×10⁻⁴** |
+| σ = 16, β_s = 1 | +853 | +515 | on schedule | **+8.5, 0.19** |
+| **σ = 16, β_s = 0** | **−110** | −432 | on schedule | +8.5, 0.19 |
+| σ = 1, β_s = 1 | +9119 | +15926 | slightly late | +134, 3.5 |
+| σ = 1, β_s = 0 | −1224 | −4710 | on schedule | +133, 3.5 |
+| σ = 0.25, β_s = 1 | +24523 | +40116, climbing | **BLOCKED: stalls, pushed back** | never exits |
+| σ = 0.25, β_s = 0 | +2422 | −8818, recovering | on schedule | −250, 6.7 |
+| σ = 0.25 bare (eT = 0), β_s = 1 | +36563 | — | pushed backwards | **NaN at t = 1.9×10⁻⁴** |
+| σ = 0.25 bare (eT = 0), β_s = 0 | +23419 | — | exits, slow, wrinkle destroyed | **NaN at t = 4.1×10⁻⁴** |
 
 Wrinkle amplitude holds at ≈ 0.034 in every completing run while the full 32
 rows track the front, decaying only as rows leave the domain, so the wrinkle
@@ -381,9 +382,9 @@ What the corrected table says, in order of importance.
 **The corrected reaction source turns the transit from a σ = 16-only
 manoeuvre into something any σ survives.** With eT = 1 and β_s = 0 the front
 crosses on schedule at every σ measured, and the transit disturbance falls
-7–10× against β_s = 1 at the same σ (+9131 → −1255 at σ = 1; +24712 → +2461
+7–10× against β_s = 1 at the same σ (+9119 → −1224 at σ = 1; +24523 → +2422
 at σ = 0.25). At σ = 16 the characteristic boundary is now *quieter during
-the crossing than the hard Dirichlet* (−114 against −147). The physics: while
+the crossing than the hard Dirichlet* (−110 against −147). The physics: while
 the reaction zone is in the boundary cells the crossing is a dilatational
 event the relaxation has no model for; β_s = 0 hands the incoming wave the
 exact chemical dp/dt, so the boundary passes the expansion instead of
@@ -406,7 +407,7 @@ the survival flag; β_s is the fidelity flag.
 
 **Post-exit anchoring is σ's job alone.** After the flame leaves, β_s has
 nothing to act on and both β_s rows land on identical residuals (+133 at
-σ = 1, +8.5 at σ = 16, −253 recovering at σ = 0.25): the emptied domain
+σ = 1, +8.5 at σ = 16, −250 recovering at σ = 0.25): the emptied domain
 returns to ambient at the relaxation rate, so the residual ranking is the
 anchoring ranking, exactly as before.
 
