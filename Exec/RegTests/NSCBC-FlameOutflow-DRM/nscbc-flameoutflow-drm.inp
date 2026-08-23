@@ -35,7 +35,6 @@ pelec.bc_nscbc_order   = 2
 
 prob.pamb          = 1013250.0
 prob.phi_in        = -0.5
-prob.probtype      = 0
 prob.u_ratio       = 2.0
 prob.sheet_x       = 1.0
 prob.wrinkle_amp   = 0.08

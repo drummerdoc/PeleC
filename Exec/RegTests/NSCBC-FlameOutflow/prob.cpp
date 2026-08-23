@@ -196,16 +196,11 @@ amrex_probinit(
   pp.query("T_in", PeleC::h_prob_parm_device->T_in);
   pp.query("vn_in", PeleC::h_prob_parm_device->vn_in);
   pp.query("pertmag", PeleC::h_prob_parm_device->pertmag);
-  pp.query("probtype", PeleC::h_prob_parm_device->probtype);
   pp.query("nscbc_inflow", PeleC::h_prob_parm_device->nscbc_inflow);
   pp.query("u_ratio", PeleC::h_prob_parm_device->u_ratio);
   pp.query("sheet_x", PeleC::h_prob_parm_device->sheet_x);
   pp.query("wrinkle_amp", PeleC::h_prob_parm_device->wrinkle_amp);
   pp.query("wrinkle_k", PeleC::h_prob_parm_device->wrinkle_k);
-  pp.query("T_hot", PeleC::h_prob_parm_device->T_hot);
-  pp.query("r_hot", PeleC::h_prob_parm_device->r_hot);
-  pp.query("apex_x", PeleC::h_prob_parm_device->apex_x);
-  pp.query("apex_y", PeleC::h_prob_parm_device->apex_y);
   pp.query("pmf_flame_loc", PeleC::h_prob_parm_device->pmf_flame_loc);
   pp.query("pmf_datafile", pmf_datafile);
   amrex::Vector<amrex::Real> local_L(AMREX_SPACEDIM, -1);
@@ -223,16 +218,9 @@ amrex_probinit(
   // Column 1 of the profile is velocity; point 0 is the fresh inlet.
   pp_d->s_L = PeleC::prob_parm_host->h_pmf_Y[1 * pp_d->pmf_N + 0];
   pp_d->u_in = pp_d->u_ratio * pp_d->s_L;
-  // sin(alpha) = S_L / U: the angle at which the normal component of the
-  // incoming stream equals the flame speed, i.e. the angle a steady oblique
-  // flame must take.
-  const amrex::Real sa = 1.0 / pp_d->u_ratio;
-  pp_d->alpha = std::asin(std::min(sa, 0.999));
   for (int i = 0; i < AMREX_SPACEDIM; i++) {
     pp_d->L[i] = probhi[i] - problo[i];
   }
-  pp_d->xapex[0] = problo[0] + pp_d->apex_x * pp_d->L[0];
-  pp_d->xapex[1] = problo[1] + pp_d->apex_y * pp_d->L[1];
   pp_d->sheet_x0 = problo[0] + pp_d->sheet_x * pp_d->L[0];
   pp_d->ylo = problo[1];
 
@@ -240,52 +228,36 @@ amrex_probinit(
                  << " cm/s,  U = " << pp_d->u_in << " cm/s (" << pp_d->u_ratio
                  << " S_L)\n";
 
-  if (pp_d->probtype == 0) {
-    const amrex::Real kk = 2.0 * constants::PI() * pp_d->wrinkle_k / pp_d->L[1];
-    const amrex::Real slope = pp_d->wrinkle_amp * kk;
-    const amrex::Real xmin = pp_d->sheet_x0 - pp_d->wrinkle_amp;
-    const amrex::Real xmax = pp_d->sheet_x0 + pp_d->wrinkle_amp;
-    const amrex::Real xout = probhi[0];
-    amrex::Print() << "     wrinkled sheet at x_f = " << pp_d->sheet_x0 << " + "
-                   << pp_d->wrinkle_amp << " cos(2 pi " << pp_d->wrinkle_k
-                   << " y / " << pp_d->L[1] << "),  x_f in [" << xmin << ", "
-                   << xmax << "]\n"
-                   << "     max tilt of the flame normal off the boundary "
-                      "normal = "
-                   << std::atan(slope) * 180.0 / constants::PI() << " deg\n";
-    if ((xmin < xout) && (xmax > xout)) {
-      // Fraction of the transverse extent for which the boundary is burnt,
-      // i.e. x_f(y) < x_out:  cos(k y) < (x_out - x0)/A.
-      const amrex::Real c0 = (xout - pp_d->sheet_x0) / pp_d->wrinkle_amp;
-      const amrex::Real frac = std::acos(c0) / constants::PI();
-      amrex::Print()
-        << "     STRADDLES the outflow: " << 100.0 * frac
-        << "% of the boundary is burnt, " << 100.0 * (1.0 - frac)
-        << "% fresh, with the reaction zone crossing at 2 points\n";
-    } else {
-      amrex::Print() << "     WARNING: the sheet does not straddle the outflow "
-                        "at x = "
-                     << xout
-                     << "; the reaction zone is not in the boundary "
-                        "cells and beta_s has nothing to correct\n";
-    }
-    amrex::Print() << "     drift speed U - S_L = " << pp_d->u_in - pp_d->s_L
-                   << " cm/s (unanchored: the sheet leaves on its own)\n\n";
+  const amrex::Real kk = 2.0 * constants::PI() * pp_d->wrinkle_k / pp_d->L[1];
+  const amrex::Real slope = pp_d->wrinkle_amp * kk;
+  const amrex::Real xmin = pp_d->sheet_x0 - pp_d->wrinkle_amp;
+  const amrex::Real xmax = pp_d->sheet_x0 + pp_d->wrinkle_amp;
+  const amrex::Real xout = probhi[0];
+  amrex::Print() << "     wrinkled sheet at x_f = " << pp_d->sheet_x0 << " + "
+                 << pp_d->wrinkle_amp << " cos(2 pi " << pp_d->wrinkle_k
+                 << " y / " << pp_d->L[1] << "),  x_f in [" << xmin << ", "
+                 << xmax << "]\n"
+                 << "     max tilt of the flame normal off the boundary "
+                    "normal = "
+                 << std::atan(slope) * 180.0 / constants::PI() << " deg\n";
+  if ((xmin < xout) && (xmax > xout)) {
+    // Fraction of the transverse extent for which the boundary is burnt,
+    // i.e. x_f(y) < x_out:  cos(k y) < (x_out - x0)/A.
+    const amrex::Real c0 = (xout - pp_d->sheet_x0) / pp_d->wrinkle_amp;
+    const amrex::Real frac = std::acos(c0) / constants::PI();
+    amrex::Print()
+      << "     STRADDLES the outflow: " << 100.0 * frac
+      << "% of the boundary is burnt, " << 100.0 * (1.0 - frac)
+      << "% fresh, with the reaction zone crossing at 2 points\n";
   } else {
-    const amrex::Real spread = pp_d->L[0] * std::tan(pp_d->alpha);
-    amrex::Print() << "     V half-angle = "
-                   << pp_d->alpha * 180.0 / constants::PI()
-                   << " deg  ->  the flame meets the outflow at "
-                   << 90.0 - pp_d->alpha * 180.0 / constants::PI()
-                   << " deg from its normal\n"
-                   << "     branches spread +-" << spread
-                   << " cm over the domain; "
-                   << "transverse half-width is " << 0.5 * pp_d->L[1] << " cm"
-                   << (spread < 0.5 * pp_d->L[1]
-                         ? "  (they exit downstream)"
-                         : "  (WARNING: they reach the periodic side)")
-                   << "\n\n";
+    amrex::Print() << "     WARNING: the sheet does not straddle the outflow "
+                      "at x = "
+                   << xout
+                   << "; the reaction zone is not in the boundary "
+                      "cells and beta_s has nothing to correct\n";
   }
+  amrex::Print() << "     drift speed U - S_L = " << pp_d->u_in - pp_d->s_L
+                 << " cm/s (unanchored: the sheet leaves on its own)\n\n";
 
   init_bc();
 }

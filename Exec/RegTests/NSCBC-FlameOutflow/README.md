@@ -216,11 +216,6 @@ wisdom into a number. If you must put one there:
 **`pelec.allow_negative_energy = 0`** is harmless in an inert case and fatal
 here — see `NSCBC-PMF/README.md`. The inputs file sets it explicitly to 1.
 
-**`prob.probtype = 1`** retains a V-flame anchored on an inlet hot spot, from an
-earlier attempt at this measurement. It compiles and initialises but has not
-been used for a measurement; the wrinkled sheet superseded it because it needs
-no anchor, no apex geometry and no steady state to wait for.
-
 ## Locating the reaction zone
 
 Use a radical, not the temperature. The temperature midpoint sits in the preheat

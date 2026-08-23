@@ -138,15 +138,12 @@ pmf(
 
 // ---------------------------------------------------------------------------
 //  NSCBC-FlameOutflow -- a premixed flame whose reaction zone lies ACROSS a
-//  subsonic characteristic outflow.  Two geometries share the machinery:
+//  subsonic characteristic outflow: a wrinkled planar sheet, unanchored, in a
+//  uniform stream at U = 2 S_L, straddling the outflow plane.
 //
-//    probtype = 0 (default)  a wrinkled planar sheet, unanchored, in a uniform
-//                            stream at U = 2 S_L, straddling the outflow plane
-//    probtype = 1            a V-flame anchored on an inlet hot spot
-//
-//  Geometry 0 is the one to reach for.  It needs no anchor: the stream carries
-//  the sheet downstream at U - S_L = S_L, so the flame simply leaves, and there
-//  is no ignition kernel, no apex, and no steady-state to wait for.  The
+//  It needs no anchor: the stream carries the sheet downstream at
+//  U - S_L = S_L, so the flame simply leaves, and there is no ignition kernel,
+//  no apex, and no steady-state to wait for.  The
 //  wrinkle x_f(y) = x0 + A cos(2 pi k y / Ly) with x0 on the outflow plane puts
 //  half the boundary in burnt gas and half in fresh, with the reaction zone
 //  passing through the boundary cells at the two crossings and the flame normal
@@ -156,86 +153,14 @@ pmf(
 //  gradients along the boundary (bc_nscbc_beta), and a multi-species diffusive
 //  structure crossing it.
 //
-//  What geometry 0 does NOT do is advect out within a measurement.  The drift
+//  What this case does NOT do is advect out within a measurement.  The drift
 //  Mach number is S_L/c ~ 6e-4, so a run long enough for the flame to clear the
 //  boundary is some 400 acoustic transits.  The sheet is therefore initialised
 //  already straddling, and is quasi-frozen over the few relaxation times the
 //  boundary needs to equilibrate.  That is not a compromise of the test -- the
 //  quantity under test is the boundary's response to a live reaction zone in
 //  its own cells, and that is present from step 0.
-//
-//  ---- probtype 1: V-flame -------------------------------------------------
-//
-//  Uniform fresh mixture enters at x-lo at U = u_ratio * S_L; a hot spot on the
-//  inlet plane anchors a flame whose two branches open downstream at the angle
-//  that makes the normal component of the incoming flow equal the flame speed,
-//
-//      sin(alpha) = S_L / U .
-//
-//  The transverse direction is periodic, so there are no physical side
-//  boundaries to complicate the picture.  With U large enough the branches do
-//  not reach the transverse boundary within the domain and instead leave
-//  through the DOWNSTREAM face -- so the outflow has a live reaction zone, its
-//  diffusive tail, and a strong tangential velocity passing through it.  That
-//  is what neither NSCBC-Acoustic (planar acoustics) nor NSCBC-PMF (an outflow
-//  sitting in equilibrium burnt gas) can test.
-//
-//  It also puts the flame across the boundary at grazing incidence: the front
-//  meets the outflow plane at 90 - alpha degrees from its normal, which is 80
-//  degrees at u_ratio = 6.  So this case exercises the transverse terms as
-//  well as the reaction source term.
-//
-//  The V is INITIALISED, not grown.  Growing it from the anchor takes a
-//  flow-through time L/U, which is some 600 acoustic transits and out of reach;
-//  instead the 1-D PMF profile is mapped onto the V through the signed normal
-//  distance to the flame surface, and the run is only long enough for the
-//  boundary to equilibrate.  Over that time the flame moves S_L * t ~ 3e-3 cm,
-//  so it is effectively a stationary, actively burning sheet lying across the
-//  outflow -- which is precisely the thing under test.
 // ---------------------------------------------------------------------------
-
-// Signed normal distance from (x,y) to the V, positive on the fresh side.
-// Exact: the V is two rays from the apex, so points upstream of the apex take
-// their distance from the apex itself rather than from the (infinite) ray line.
-// The two branches are continuous where they meet.
-AMREX_GPU_DEVICE
-AMREX_FORCE_INLINE
-amrex::Real
-v_signed_distance(
-  const amrex::Real x,
-  const amrex::Real y,
-  ProbParmDevice const& prob_parm,
-  amrex::Real& nx,
-  amrex::Real& ny,
-  amrex::Real& tx,
-  amrex::Real& ty)
-{
-  const amrex::Real ca = std::cos(prob_parm.alpha);
-  const amrex::Real sa = std::sin(prob_parm.alpha);
-  const amrex::Real dx = x - prob_parm.xapex[0];
-  const amrex::Real dyr = y - prob_parm.xapex[1];
-  const amrex::Real sg = (dyr >= 0.0) ? 1.0 : -1.0;
-  const amrex::Real dy = std::abs(dyr);
-
-  // Projection onto the branch direction (ca, sa).
-  const amrex::Real t = dx * ca + dy * sa;
-  amrex::Real s;
-  if (t <= 0.0) {
-    // Upstream of the apex: nearest point is the apex.
-    s = std::sqrt(dx * dx + dy * dy);
-    const amrex::Real r = amrex::max<amrex::Real>(s, 1.0e-30);
-    nx = dx / r;
-    ny = sg * dy / r;
-  } else {
-    s = dy * ca - dx * sa;
-    nx = -sa;
-    ny = sg * ca;
-  }
-  // Tangent is the branch direction, i.e. downstream along the flame.
-  tx = ca;
-  ty = sg * sa;
-  return s;
-}
 
 // Signed normal distance to a WRINKLED PLANAR SHEET at x = xf(y), positive on
 // the burnt (downstream) side, with the unit normal pointing fresh -> burnt.
@@ -284,20 +209,9 @@ pc_initdata(
   const amrex::Real x = prob_lo[0] + (i + 0.5) * dx[0];
   const amrex::Real y = prob_lo[1] + (j + 0.5) * dx[1];
 
-  amrex::Real nx = 0.0, ny = 0.0, tx = 0.0, ty = 0.0, sb = 0.0;
-  if (prob_parm.probtype == 0) {
-    // Wrinkled sheet: sb is the distance on the BURNT side.
-    sb = sheet_signed_distance(x, y, prob_parm, nx, ny);
-    tx = -ny;
-    ty = nx;
-  } else {
-    // V-flame: v_signed_distance returns the distance on the FRESH side, with
-    // the normal pointing toward fresh, so flip to the common convention.
-    const amrex::Real sf = v_signed_distance(x, y, prob_parm, nx, ny, tx, ty);
-    sb = -sf;
-    nx = -nx;
-    ny = -ny;
-  }
+  // Wrinkled sheet: sb is the distance on the BURNT side.
+  amrex::Real nx = 0.0, ny = 0.0;
+  const amrex::Real sb = sheet_signed_distance(x, y, prob_parm, nx, ny);
 
   // Sample the 1-D flame.  The profile runs fresh (low) to burnt (high), so
   // the burnt-side distance adds to the flame location.
@@ -316,21 +230,12 @@ pc_initdata(
   amrex::Real rho = 0.0, energy = 0.0;
   eos.PYT2RE(prob_parm.pamb, massfrac, T, rho, energy);
 
-  amrex::Real u = 0.0, v = 0.0;
+  // Uniform stream plus the flame's own dilatation along its normal.  On the
+  // fresh side un = S_L and this is exactly (U, 0); across the flame the gas
+  // is accelerated normal to the sheet by the density ratio, as it must be.
   const amrex::Real un = pmf_vals[1]; // flame-normal speed from the profile
-  if (prob_parm.probtype == 0) {
-    // Uniform stream plus the flame's own dilatation along its normal.  On the
-    // fresh side un = S_L and this is exactly (U, 0); across the flame the gas
-    // is accelerated normal to the sheet by the density ratio, as it must be.
-    u = prob_parm.u_in + (un - prob_parm.s_L) * nx;
-    v = (un - prob_parm.s_L) * ny;
-  } else {
-    // Oblique steady flame: tangential component continuous, normal component
-    // set by the profile.
-    const amrex::Real Ut = prob_parm.u_in * std::cos(prob_parm.alpha);
-    u = Ut * tx + un * nx;
-    v = Ut * ty + un * ny;
-  }
+  const amrex::Real u = prob_parm.u_in + (un - prob_parm.s_L) * nx;
+  const amrex::Real v = (un - prob_parm.s_L) * ny;
 
   const amrex::Real ke = 0.5 * (u * u + v * v);
   state(i, j, k, URHO) = rho;
@@ -345,14 +250,12 @@ pc_initdata(
   }
 }
 
-// Fresh-stream inlet state, with the anchoring hot spot.  Shared by the
-// reference bcnormal and by the characteristic inflow target so the two cannot
-// drift apart.
+// Fresh-stream inlet state.  Shared by the reference bcnormal and by the
+// characteristic inflow target so the two cannot drift apart.
 AMREX_GPU_DEVICE
 AMREX_FORCE_INLINE
 void
-vflame_inlet(
-  const amrex::Real y,
+inlet_state(
   ProbParmDevice const& prob_parm,
   amrex::Real& T,
   amrex::Real massfrac[NUM_SPECIES])
@@ -367,11 +270,6 @@ vflame_inlet(
   auto eos = pele::physics::PhysicsType::eos();
   eos.X2Y(molefrac, massfrac);
   T = pmf_vals[0];
-  if (
-    (prob_parm.probtype == 1) &&
-    (std::abs(y - prob_parm.xapex[1]) < prob_parm.r_hot)) {
-    T = prob_parm.T_hot; // hot reactants: ignites, and anchors the V
-  }
 }
 
 // The reference boundary condition, used when pelec.bc_nscbc = 0: the inlet
@@ -398,7 +296,7 @@ bcnormal(
   amrex::Real T = 0.0, rho = 0.0, energy = 0.0, u = 0.0, v = 0.0;
 
   if (sgn == 1) {
-    vflame_inlet(x[1], prob_parm, T, massfrac);
+    inlet_state(prob_parm, T, massfrac);
     u = prob_parm.u_in;
     v = 0.0;
     eos.PYT2RE(prob_parm.pamb, massfrac, T, rho, energy);
@@ -453,7 +351,7 @@ struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
       return t; // Type::off -> the inlet falls through to the hard bcnormal
     }
     amrex::Real T = 0.0, massfrac[NUM_SPECIES] = {0.0};
-    vflame_inlet(x[1], prob_parm, T, massfrac);
+    inlet_state(prob_parm, T, massfrac);
     t.type = pc_nscbc::Type::inflow;
     t.T = T;
     t.u[0] = prob_parm.u_in;

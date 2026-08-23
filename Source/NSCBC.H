@@ -4,144 +4,53 @@
 //  NSCBC.H -- characteristic (Navier-Stokes Characteristic Boundary Condition)
 //             ghost-cell fill for subsonic inflow and outflow faces.
 //
-//  This header is deliberately free of any dependency on PeleC.H so that it can
-//  also be compiled by the standalone 1-D verification driver in
-//  Verification/NSCBC1D.  Its only dependencies are IndexDefines.H, the
-//  PelePhysics EOS, and AMReX.
+//  Deliberately free of any dependency on PeleC.H so the standalone driver in
+//  Verification/NSCBC1D compiles it unmodified; depends only on
+//  IndexDefines.H, the PelePhysics EOS, and AMReX.
 //
-//  ---------------------------------------------------------------------------
-//  FORMULATION
-//  ---------------------------------------------------------------------------
-//  Everything is written in an "outward-normal" frame,
+//  FORMULATION.  Everything is written in an outward-normal frame,
+//  u_out = n_sgn * u_n (n_sgn = +1 on a hi face, -1 on a lo face), so one
+//  code path serves all six faces and an outflow always has u_out > 0.  The
+//  outward wave speeds are u_out - c (always incoming subsonically), u_out
+//  (the lambda_0 family: entropy, tangential velocity, species, passives --
+//  outgoing at an outflow, incoming at an inflow) and u_out + c (always
+//  outgoing).  Hence a subsonic outflow specifies one quantity (p); a
+//  subsonic inflow specifies u, T and Y.
 //
-//      u_out = n_sgn * u_n ,      n_sgn = -sgn = +1 on a hi face, -1 on a lo
-//                                 face,
+//  We work with linearised invariants, the impedance rho*c FROZEN at the
+//  boundary cell N (a per-cell impedance would make R differences of two
+//  different variables):
 //
-//  so that a single code path serves all six faces and an outflow always has
-//  u_out > 0.  In that frame the wave speeds along the outward normal are
+//      R_+/- = u_out +/- p/(rho c),     S = rho - p/c^2 .
 //
-//      lambda_-  = u_out - c   (always < 0 subsonically -> ALWAYS INCOMING)
-//      lambda_0  = u_out       (outgoing at an outflow, incoming at an inflow)
-//      lambda_+  = u_out + c   (always > 0 subsonically -> ALWAYS OUTGOING)
+//  Outgoing quantities extrapolate outward on a minmod-limited slope; the
+//  incoming one takes the Poinsot-Lele relaxation as a gradient increment,
 //
-//  The lambda_0 family carries the entropy, the two tangential velocities, the
-//  NUM_SPECIES mass fractions and any advected/auxiliary/passive scalars.  That
-//  the lambda_0 family flips direction between inflow and outflow is the whole
-//  content of the inflow/outflow distinction:
+//      L_in = K (phi - phi_target),  K = coeff (1 - M^2) c / L_ref  [1/s]
+//      R_-,ghost = R_-,N + layer dx L_in / ((c - u_out) rho c) ,
 //
-//      subsonic OUTFLOW: 1 incoming characteristic  -> specify 1 quantity (p)
-//      subsonic INFLOW : D+NUM_SPECIES+1 incoming   -> specify u, T, Y
+//  so K is a mesh-independent RATE and literature coefficients transfer
+//  directly.  The gradient form gives L_in an additive slot for the
+//  transverse terms (beta) and the reaction source (beta_s); a hard pin of
+//  R_- has none.  The fill is a pure algebraic function of the current
+//  interior state: idempotent under repeated FillPatch calls,
+//  bit-reproducible across restarts and decompositions.
 //
-//  We work with the linearised characteristic *invariants* rather than with the
-//  wave amplitudes L_i and their normal derivatives:
+//  SIGNS.  Every user-facing coefficient (sigma, relax_u, relax_t) is
+//  positive; all sign handling is internal and Params::validate() rejects
+//  negatives.
 //
-//      R_+ = u_out + p/(rho c)      (outgoing)
-//      R_- = u_out - p/(rho c)      (incoming)
-//      S   = rho - p/c^2            (entropy, linearised)
+//  GPU.  Finiteness guards use amrex::Math::isfinite, never std::isfinite
+//  (SYCL fast-math makes the latter constant-false, which would silently
+//  degrade every fill to a zero-gradient copy).  No allocation, no virtual
+//  dispatch, no printf/Abort on the device path; fallbacks are counted via
+//  atomics (see Diag).  Stack footprint is order 10*NVAR doubles per thread
+//  and will spill past the register budget for large mechanisms; tolerable
+//  because the launch covers only a thin ghost region.
 //
-//  with the acoustic impedance rho*c FROZEN at the boundary cell N.  Freezing
-//  is not an optimisation: R_+ is only an invariant of the system linearised
-//  about a fixed state, so if rho*c were re-evaluated per stencil cell then
-//  R_+(N) - R_+(N-1) would be a difference of two different variables and its
-//  use as a slope would be meaningless.
-//
-//  Outgoing quantities (R_+ always; S or T, u_t, Y, scalars at an outflow) are
-//  extrapolated outward from the interior with a minmod-limited linear slope.
-//  Which of S or T is extrapolated is Params::extrap_temperature -- see there;
-//  it matters because the diffusion operator reads these same ghost cells.
-//  Incoming quantities are set from a target state through the classical
-//  Poinsot-Lele relaxation:
-//
-//      L_incoming = K (phi - phi_target) ,   K = coeff * (1 - M^2) * c / L_ref
-//
-//  converted to an increment on the invariant over the ghost offset,
-//
-//      R_-,ghost = R_-,N + layer * dx * dR_-/dn ,
-//      dR_-/dn   = -L_incoming / (lambda_- * rho c) .
-//
-//  K is a RATE [1/s] built from a physical length, so the boundary relaxation
-//  time tau = 1/K is independent of the mesh and of the ghost layer count, and
-//  literature values of the relaxation coefficient transfer directly.  The
-//  boundary pressure then relaxes toward the far field with
-//
-//      tau_relax = L_ref / (sigma (1 - M^2) c)
-//
-//  which at sigma = 0.25 and low Mach is about four acoustic transit times.
-//  That is the entire content of "sigma = 0.25 is a good default".
-//
-//  Two notes on what this is NOT:
-//
-//    1. Transverse terms are available, weighted by Params::beta, and the
-//       reaction source is available, weighted by Params::beta_s -- see the
-//       guidance on those members.  Both are computed cell-locally from the
-//       boundary cell and its tangential neighbours, so neither needs
-//       sources_for_hydro (which does not exist during FillPatch).  The
-//       VISCOUS source is genuinely absent.  With beta = beta_s = 1 (the
-//       defaults) both are discarded and this is the pure 1-D-normal LODI
-//       limit.
-//
-//       Neither correction rescues an outflow placed on a flame.  Measured in
-//       Exec/RegTests/NSCBC-FlameOutflow, beta_s moves the mean pressure error
-//       there by under 1%, because the dominant error is not the heat release:
-//       it is a ghost-pressure bias driven by the normal velocity gradient,
-//       dp ~ rho c L_ref (du_out/dn) / sigma, which is present with chemistry
-//       switched off entirely.  Place outflows where the flow is smooth.
-//
-//       That the transverse terms fit here at all is a consequence of writing
-//       the relaxation as a GRADIENT increment: they are additive on
-//       L_incoming, so there is a slot for them.  A hard far-field pin of R_-
-//       has no such slot, which is why pin_farfield ignores beta.
-//
-//    2. It is not a time-integrated boundary condition.  The fill is a pure
-//       algebraic function of the current interior state, so it is idempotent
-//       under the repeated FillPatch calls of an SDC iteration.
-//
-//  ---------------------------------------------------------------------------
-//  SIGN CONVENTIONS
-//  ---------------------------------------------------------------------------
-//  Every user-facing relaxation coefficient (sigma, relax_u, relax_t) is
-//  POSITIVE.  The legacy Fortran required relax_T to be negative, and its
-//  documentation and its code disagreed about the sign of sigma_out; all such
-//  sign handling is internal here.  Params::validate() rejects negatives.
-//
-//  ---------------------------------------------------------------------------
-//  GPU PORTABILITY
-//  ---------------------------------------------------------------------------
-//  Finiteness guards use amrex::Math::isfinite, NOT std::isfinite. AMReX_Math.H
-//  documents why: SYCL's fast-math makes std::isfinite evaluate to false even
-//  at -O1.  Every use of it in this file is a guard of the form
-//
-//      if (!isfinite(x)) { fall back; bump(counter); }
-//
-//  so under a SYCL build with std::isfinite EVERY guard would fire and the
-//  boundary would silently degrade to a zero-gradient copy -- correct-looking
-//  code producing a quietly different boundary condition on one vendor's GPUs.
-//  The diagnostic counters would at least make it visible, which is the second
-//  reason they exist.
-//
-//  There is no dynamic allocation, no virtual dispatch, no recursion, and no
-//  printf or Abort on the device path; the fallback counters are incremented
-//  with amrex::HostDevice::Atomic::Add.
-//
-//  The one cost worth knowing about is stack footprint.  The caller holds
-//  4*NVAR doubles of stencil and ghost state plus 2*(D-1)*NVAR of tangential
-//  neighbours, and apply() adds three CellPrim plus the species work arrays --
-//  order 10*NVAR doubles per thread in 3-D, which is 2.2 kB for a 21-species
-//  mechanism and 4.8 kB for a 53-species one.  That exceeds the 255-register
-//  budget and will spill to local memory.  It is tolerable because the launch
-//  is over a thin ghost region rather than the whole domain, but it is the
-//  first thing to look at if a boundary fill ever shows up in a GPU profile.
-//
-//  ---------------------------------------------------------------------------
-//  EOS PORTABILITY
-//  ---------------------------------------------------------------------------
-//  Only density-carrying ("R...") EOS entry points are used:
-//      RTY2P, RTY2Cs, RYP2T, RTY2E, REY2T, PYT2RE
-//  The shortcut forms TY2Cp, TY2G, EY2T, RG2dpde, RPE2dpdr_e, T2Hi et al.
-//  amrex::Error() out under the SRK real-gas EOS.  Keeping to the list above
-//  makes this kernel real-gas capable at no extra cost.  Note also that SRK's
-//  RYP2E is implemented as RYP2T followed by RTY2E, so calling those two
-//  directly costs one Newton solve instead of two.
+//  EOS.  Only density-carrying entry points are used (RTY2P, RTY2Cs, RYP2T,
+//  RTY2E, REY2T, PYT2RE), which keeps the kernel real-gas capable: the
+//  shortcut forms error out under SRK.
 // ============================================================================
 
 #include <AMReX_REAL.H>
@@ -184,203 +93,63 @@ struct Params
 
   // Weight on the transverse terms in the modelled incoming acoustic:
   //     L_in = K (phi - phi_target) - (1 - beta) * T_transverse
-  //   1  discard them entirely -- the 1-D-normal LODI limit
-  //   0  include them fully
-  //   <0 use the local Mach number, |M|, clamped to [0,1]
-  // beta = 1 reproduces the Phase 1 behaviour bit for bit, which is why it is
-  // the default: enabling the transverse terms is an opt-in change.
+  //   1 discards them (the 1-D-normal LODI limit, and the default: enabling
+  //   them is an opt-in change), 0 includes them fully, < 0 selects the
+  //   pointwise local Mach number (the legacy Fortran convention).
   //
-  // Guidance, measured in Exec/RegTests/NSCBC-COVO rather than assumed.
-  //
-  // For a plane wave meeting the boundary at angle theta to the normal, the
-  // obliqueness error that the transverse term has to cancel works out to
-  //
-  //     (1 - beta)_opt = cos(theta) / (1 + cos(theta))
-  //     =>  beta_opt   = 1 - cos(theta)/(1 + cos(theta))
-  //
-  // which is 0.5 at normal incidence and rises toward 1 as the wave becomes
-  // grazing (0.67 at 60 deg, 0.79 at 75 deg).  Both measured optima land on
-  // that curve: the convected vortex, a broad near-normal structure, is best
-  // at beta = 0.5; the circular pulse, whose surviving arc crossed the faces
-  // near-tangentially, is best at beta = 0.8.
-  //
-  //     COVO   rms residual vs the no-boundary floor:
-  //            hard 14.0x,  beta=1 10.0x,  beta=0.8 7.3x,  beta=0.5 3.8x,
-  //            beta=0.2 6.9x,  beta=0 132x,  local-Mach 16.1x
-  //     pulse  front amplitude spread around the arc:
-  //            hard 21.4%,  beta=1 0.90%,  beta=0.8 0.066%,  beta=0.5 1.08%,
-  //            beta=0.2 2.21%,  beta=0 2.9%
-  //
-  // Note the shape of that curve: too little correction costs a factor of a
-  // few, too much is catastrophic -- beta = 0 is close to unstable.  This is
-  // why the default is 1 (the Phase 1 behaviour) and not the optimum -- a
-  // wrong beta is far more dangerous than an absent one.  Start at 0.5, and
-  // raise it toward 1 if the boundary is mostly met at grazing incidence.
-  //
-  // beta < 0 selects the local Mach number pointwise, which is the legacy
-  // Fortran's convention.  The measurements do not support it, and the
-  // Phase-0 re-sweep sharpened why: it is not that its VALUE lands wrong (a
-  // constant beta = 0.2 measures 6.9x, better than beta = 1), it is that the
-  // convention varies beta point-by-point with whatever structure is crossing
-  // the boundary -- the vortex swirl modulates M and therefore the correction
-  // -- and that pointwise wobble measures 16.1x, worse than no transverse
-  // terms at all.
+  // Exact blend for a plane wave at angle theta:
+  // beta_opt = 1 - cos(theta)/(1+cos(theta)) -- 0.5 head-on, toward 1 at
+  // grazing; both measured optima land on it (NSCBC-COVO/README.md).  The
+  // response is asymmetric: beta = 0 is near-unstable and pointwise
+  // local-Mach is worse than no correction.  A wrong beta is more dangerous
+  // than an absent one: start at 0.5, raise toward 1 for grazing incidence.
   amrex::Real beta = 1.0;
 
   // Weight on the REACTION source term in the modelled incoming acoustic,
   // with the same convention as beta:
   //     L_in = K (phi - phi_target) - (1 - beta) T + (1 - beta_s) S_reaction
-  //   1  discard it -- the default, and the only correct choice when the
-  //      boundary is far enough from the flame that heat release there is
-  //      negligible
-  //   0  include it fully
+  //   1 discards it (the default; correct when no heat release reaches the
+  //   boundary cells), 0 includes it fully.
   //
-  // What this corrects.  A flame near an outflow raises the pressure in the
-  // boundary cell at a rate the 1-D relaxation has no model for, so sigma has
-  // to absorb it and the mean pressure sits off target.  S_reaction supplies
-  // the missing dp/dt.
-  //
-  // Why the sign is PLUS, in this kernel's own outward frame.  The LODI
-  // pressure and normal-velocity equations with transverse and chemical
-  // sources are
-  //     dp/dt = -(L5 + L1)/2 - T_p + S_p
-  //     du/dt = -(L5 - L1)/(2 rho c) - T_u
-  // and the incoming invariant this fill actually writes is R- = u - p/(rho c),
-  // so
-  //     dR-/dt = (1/rho c) [ L1 + (T_p - rho c T_u) - S_p ]
-  //            = (1/rho c) [ L1 + T_in - S_p ] ,
-  // with T_in exactly the quantity assembled in transverse_terms() below.  A
-  // perfectly non-reflecting boundary wants dR-/dt = 0, i.e. L1 = -T_in + S_p:
-  // the transverse term enters with a minus and the source with a PLUS.  The
-  // asymmetry is not a convention; it is that T_in was defined with the sign it
-  // carries in dR-/dt and S_p with the sign it carries in dp/dt.
-  //
-  // Convention-free confirmation, from the exact steady state rather than from
-  // anyone's L-definitions.  Heat release at constant pressure produces the
-  // dilatation du/dn = S_p/(rho c^2), so the exact R- gradient at a steady
-  // flame is +S_p/(rho c^2); this fill imposes dR-/dn = L_in/(rho c^2) for
-  // u << c, so it reproduces the exact state at p = p_target only with +S_p.
-  // Verification/NSCBC1D/source_sign_check.py transcribes this fill into a 1-D
-  // linear-acoustics model whose steady state is known and reports the
-  // equilibrium offset (p_N - p_t) K / S_p for the three signs.
-  //
-  // This term was subtracted until Phase 0, which means beta_s = 0 DOUBLED the
-  // heat-release push on R- instead of cancelling it -- offset 2 S_p/K, worse
-  // than leaving the term off.  Every beta_s = 0 number measured before that
-  // fix (PMF 65 -> 80, FlameOutflow 2065 -> 2074) is a measurement of the bug.
-  // With the sign corrected, beta_s = 0 is the Sutherland-Kennedy (JCP 2003)
-  // cancellation of the steady-flame pressure offset (1-alpha) S_p/K, and is
-  // the right choice for a flame SITTING on the boundary.  Re-measured on the
-  // flame-outflow case (beta = 0.5, order 2): at sigma = 1 the switch now
-  // halves the boundary error (2062 -> 1089 dyn/cm2), and combined with
-  // extrap_temperature it holds the error at the hard-outflow level at every
-  // sigma measured (-507/-522/-511 at sigma = 0.25/1/16).  At sigma = 16 with
-  // beta_s = 1 already near the mark, adding it overshoots (+49 -> -281):
-  // do not stack full relaxation and the full source.  On a TRANSIT (the
-  // flame-exit test) beta_s = 0 with extrap_temperature cuts the crossing
-  // disturbance 7-10x at every sigma and is what lets sigma < 16 survive the
-  // crossing at all; post-exit residuals are sigma's alone.
-  //
-  // Note that this is NOT obtainable from PeleC's srcq(QPRES): that expression
-  // (Hydro.H) is built only from the density and internal-energy sources, and
-  // chemistry supplies neither -- mass is conserved and PeleC's constant-volume
-  // reactor conserves total energy because the formation enthalpies live inside
-  // e.  The entire effect is compositional, dp/dY|_{rho,e}, which srcq(QPRES)
-  // does not carry.  See reaction_dpdt() below.
+  // A flame in the boundary cells raises p at S_p = dp/dt|_react, which the
+  // relaxation has no model for; without this term the mean sits off target
+  // by S_p/K.  Including it is the Sutherland-Kennedy (JCP 2003)
+  // cancellation; the sign is PLUS because the exact steady flame has
+  // dR_-/dn = +S_p/(rho c^2) (convention-free check:
+  // Verification/NSCBC1D/source_sign_check.py).  Guidance, measured in
+  // NSCBC-FlameOutflow/README.md: sitting flame -- beta_s = 0 halves the
+  // sigma = 1 error and with extrap_temperature holds hard-outflow level at
+  // every sigma (at sigma = 16 it overshoots; do not stack both).  Crossing
+  // flame -- with extrap_temperature it cuts the transit disturbance 7-10x
+  // and lets sigma < 16 survive.  Not obtainable from srcq(QPRES); see
+  // reaction_dpdt().
   amrex::Real beta_s = 1.0;
 
-  // Close the lambda_0 family on TEMPERATURE rather than on the linearised
-  // entropy invariant S = rho - p/c^2.
-  //
-  // Both are legitimate: the lambda_0 family carries entropy, and T is a
-  // function of (rho, p, Y), so extrapolating either one and deriving the other
-  // closes the family.  For a smooth flow they agree to first order.  They do
-  // NOT agree across a steep temperature ramp, and the difference matters for a
-  // reason that has nothing to do with the hyperbolic problem: PeleC's
-  // diffusion operator forms the conductive and species fluxes at a physical
-  // boundary face from these ghost cells, so whatever normal temperature
-  // gradient the ghost carries IS the heat flux leaving the domain.
-  //
-  // With the entropy closure, T is whatever the EOS returns from the
-  // extrapolated rho and the acoustically-set p, and nothing constrains its
-  // gradient.  Check C8 in Verification/NSCBC1D measures the consequence on a
-  // flame-like ramp (2e4 K/cm): the ghost overstates the face temperature
-  // gradient by 40%.  With this set, T is extrapolated with the same
-  // minmod-limited slope as everything else and rho follows from the EOS, so
-  // the conductive flux at the face is a controlled continuation of the
-  // interior one.
-  //
-  // Default false: the entropy closure is the historical behaviour and the
-  // textbook one, and switching it changes every outflow result, so it is
-  // opt-in.  Turn it on when a thermal or compositional structure is anywhere
-  // near the boundary.
+  // Close the lambda_0 family on TEMPERATURE instead of the entropy
+  // invariant.  The diffusion operator forms boundary-face fluxes from these
+  // ghost cells, so the ghost dT/dn IS the heat flux leaving; the entropy
+  // closure sets T as a by-product of the acoustic algebra and overstates a
+  // flame-like face gradient by 40% (check C8).  With this set, T rides the
+  // same minmod slope as everything else and rho follows from the EOS -- a
+  // deliberate Neumann condition on T instead of an accidental Dirichlet one.
+  // Default false (changes every outflow result).  Turn it on whenever
+  // thermal or compositional structure nears the boundary: it is the flag
+  // that lets a flame survive the outflow (NSCBC-FlameOutflow/README.md).
   bool extrap_temperature = false;
 
-  // Continue the MATERIAL part of the incoming invariant R_- into the ghost
-  // at an outflow, so that a dilatational velocity gradient crossing the face
-  // is not converted into ghost pressure.
-  //
-  // The problem this solves.  Linearised about the boundary cell,
-  //
-  //     outgoing acoustic wave:            dR_+ = 2 du,   dR_- = 0
-  //     material structure (dp ~ 0):       dR_+ = dR_- = du
-  //
-  // The default treatment extrapolates R_+ with its full interior slope and
-  // gives R_- only the relaxation increment, so across material structure the
-  // ghost picks up p_g - p_N = 1/2 rho c l du_out per layer -- the bias of
-  // check C9(a) in Verification/NSCBC1D and the dominant error at a
-  // front-crossing outflow (Exec/RegTests/NSCBC-FlameOutflow).  Continuing
-  // the material slope of R_- as well makes the ghost carry the interior's
-  // u and p slopes exactly and the bias vanishes, at ANY sigma.
-  //
-  // Why the slope cannot simply be measured from R_-.  The interior gradient
-  // of R_- also contains every piece of INCOMING acoustics near the boundary
-  // -- including the anchoring wave the relaxation itself launches -- and
-  // extrapolating that back into the ghost is a positive feedback loop: it
-  // multiplies the effective relaxation rate (measured 16x in the C5 rate
-  // check) and reflects an outgoing pulse at 13% instead of 0.8%.  The
-  // 1-D acoustic pair alone cannot distinguish material structure from
-  // counter-running waves; what does distinguish them is the entropy family,
-  // which is OUTGOING at an outflow and carries no acoustic content:
-  //
-  //     dS = drho - dp/c^2      -> 0        for any acoustic wave
-  //                             -> drho     for material structure
-  //
-  // Steady continuity through the face (d(rho u) = 0, with the momentum-flux
-  // pressure gradient dp = -rho u du) turns that into a bound on the material
-  // velocity slope,
-  //
-  //     du_mat = -u_out dS / (rho (1 - M^2)) ,   dR_-^mat = du_mat (1 + M) ,
-  //
-  // and the applied slope is minmod(measured dR_-, dR_-^mat): across a flame
-  // the two agree and the measured slope is used exactly; for pure acoustics
-  // the entropy bound is ~0 and the continuation shuts itself off, so the
-  // feedback path is closed -- every quantity the incoming model consumes
-  // rides an outgoing family.  A structure that advects without dilatation
-  // (a contact: du = 0, drho != 0) has measured dR_- = 0 and is equally
-  // unaffected.
-  //
-  // The bound assumes the structure is quasi-steady in the LAB frame; a front
-  // advancing against the flow at speed V has its true slope underestimated
-  // by u/(u - V), so the continuation is partial there -- conservative, never
-  // amplifying.  Keep sigma > 0 with this on: the relaxation increment is
-  // still the only anchoring.
-  //
-  // Measured (Exec/RegTests/NSCBC-FlameOutflow, quasi-frozen front, sigma=1):
-  // 5% alone, 42% together with extrap_temperature -- the two closures
-  // compound into a fully consistent material continuation.  Measured on the
-  // exit test of the same case (a front actually LEAVING at U = 40 S_L):
-  // at sigma = 0.25 the continuation turns the crossing into a runaway that
-  // drains the domain and quenches the flame -- the quasi-steady model does
-  // not describe a fast transit, and the weak relaxation cannot answer for
-  // it.  At sigma = 16 it is safe but unhelpful.
-  //
-  // Default false: it changes outflow results near structures, so it is
-  // opt-in, like extrap_temperature.  Turn it on for material structure that
-  // SITS near the outflow (a held or slowly drifting flame, a density
-  // gradient, a wake); leave it off, or pair it with a large sigma, when a
-  // front actually passes out through the face.  pin_farfield ignores it: a
-  // value pin has no slot for a slope.
+  // Continue the MATERIAL part of R_- into the ghost at an outflow, so a
+  // dilatational gradient crossing the face is not converted into ghost
+  // pressure (the C9(a) bias, 1/2 rho c l du per layer).  The slope cannot be
+  // read from R_- itself (its gradient contains the boundary's own incoming
+  // waves; extrapolating them back is positive feedback, 16x on the rate,
+  // C5), so it is bounded through the acoustically-blind entropy family:
+  //     du_mat = -u_out dS / (rho (1 - M^2)),
+  //     applied slope = minmod(measured dR_-, du_mat (1 + M)).
+  // For pure acoustics the bound vanishes and the continuation shuts off.
+  // Quasi-steady bound: conservative for a moving front; keep sigma > 0.
+  // Default false.  For structure that SITS near the outflow; leave it off
+  // when a front crosses -- a transit over-vents (NSCBC-FlameOutflow/
+  // README.md).  pin_farfield ignores it.
   bool extrap_material = false;
 
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
@@ -395,15 +164,11 @@ struct Params
   // done without recompiling.  Verification knob, not a physics knob.
   int order = 2;
 
-  // Replace the Poinsot-Lele relaxation of the incoming acoustic by a hard pin
-  // of R_- to the far-field value (u_out = 0, p = p_target).  It is
-  // simultaneously non-reflecting and anchored, but it anchors to
-  // p_target + rho c u_out rather than to p_target, and it is a value
-  // constraint rather than a rate, so its effective relaxation rate is c/dx
-  // -- i.e. it does not converge under grid refinement.
-  // Right for an open boundary onto a large quiescent reservoir; wrong for a
-  // duct exhausting into a plenum whose true mean pressure is not p_target.
-  // sigma is ignored when this is set.
+  // Replace the relaxation by a hard pin of R_- to the far-field value
+  // (u_out = 0, p = p_target): non-reflecting AND anchored, but it anchors to
+  // p_target + rho c u_out, and as a value constraint its effective rate is
+  // c/dx -- it does not converge under refinement.  For a boundary onto a
+  // quiescent reservoir; wrong for a through-flow duct.  sigma is ignored.
   bool pin_farfield = false;
 
   AMREX_GPU_HOST bool validate(std::string& why) const
@@ -443,16 +208,11 @@ struct Params
 };
 
 // ---------------------------------------------------------------------------
-//  Target state returned per boundary point by the problem hook.
-//
-//  Only the entries relevant to `type` are read:
-//    outflow -> p
-//    inflow  -> u[], T, Y[]
-//  There is deliberately no relaxation coefficient for composition: at a
-//  subsonic inflow every species characteristic is incoming, so hard
-//  imposition is well posed; at a subsonic outflow every species
-//  characteristic is outgoing, so composition is extrapolated and imposing it
-//  would over-specify the problem.
+//  Target state returned per boundary point by the problem hook.  Only the
+//  entries relevant to `type` are read: outflow -> p; inflow -> u[], T, Y[].
+//  Deliberately no relaxation for composition: at an inflow every species
+//  characteristic is incoming (hard imposition is well posed), at an outflow
+//  all are outgoing (imposing would over-specify).
 // ---------------------------------------------------------------------------
 struct Target
 {
@@ -464,26 +224,12 @@ struct Target
 };
 
 // ---------------------------------------------------------------------------
-//  Tangential neighbours of the BOUNDARY CELL, for the transverse terms.
-//
-//  The transverse contribution to the incoming acoustic amplitude is, in the
-//  outward-normal frame and summed over the tangential directions t,
-//
-//      T_in = sum_t [ u_t ( dp/dt - rho c du_out/dt ) ]  +  gamma p sum_t
-//      du_t/dt
-//
-//  which reduces to Motheau's T1 on a hi face and to his T4 on a lo face -- the
-//  outward frame absorbs the sign flip that makes those two look like different
-//  expressions.  Every derivative is evaluated at the boundary cell.
-//
-//  The caller supplies the two tangential neighbours per direction with their
-//  indices ALREADY CLAMPED into the domain, so only interior cells are ever
-//  read and the fill stays a pure function of valid data.  At a corner the
-//  clamp collapses the stencil, which is why the spacing is passed as an
-//  explicit reciprocal rather than assumed: inv_dt = 1/(x_p - x_m), and zero
-//  when both neighbours land on the same cell.  That degrades a corner to a
-//  one-sided or vanishing transverse derivative instead of reading a ghost
-//  cell another thread is writing.
+//  Tangential neighbours of the BOUNDARY CELL, for the transverse terms
+//      T_in = sum_t [ u_t (dp/dt - rho c du_out/dt) ] + gamma p sum_t du_t/dt
+//  (derivatives at the boundary cell; the outward frame absorbs the lo/hi
+//  sign flip).  Neighbour indexing is the caller's -- see tang_range() in
+//  BCfill.cpp -- and the spacing arrives as an explicit reciprocal, zero when
+//  a collapsed corner stencil leaves nothing to difference.
 // ---------------------------------------------------------------------------
 struct Transverse
 {
@@ -494,15 +240,10 @@ struct Transverse
 };
 
 // ---------------------------------------------------------------------------
-//  Diagnostic counters.  Every fallback in this kernel is counted; a silent
-//  fallback is a bug that will not be found.  Indices into a small device
-//  array reduced at the end of the run.  The storage is amrex::Long, not int:
-//  the counters are only reset when they are REPORTED, and with the default
-//  sum_interval = -1 they never are -- the supersonic counter on a large 3-D
-//  run increments once per supersonic ghost cell per fill and walks past 2^31
-//  in a few times 10^4 steps, and an overflowing signed atomic is exactly the
-//  kind of quiet corruption these counters exist to prevent.  amrex::Gpu::
-//  Atomic::Add has a native Long specialisation on every backend.
+//  Diagnostic counters.  Every fallback is counted; a silent fallback is a
+//  bug that will not be found.  Storage is amrex::Long, not int: with the
+//  default sum_interval = -1 the counters are never reset, and the supersonic
+//  counter on a large 3-D run walks past 2^31 in ~1e4 steps.
 // ---------------------------------------------------------------------------
 namespace Diag {
 enum : int {
@@ -513,12 +254,11 @@ enum : int {
   floored,         // a positivity floor was hit
   transverse_drop, // a transverse derivative was unavailable or unusable
   source_drop,     // a modelled source term was unavailable or unusable
-  structure,       // material structure sat in an outflow boundary cell:
-                   // |dS| > 5% of rho per cell.  ADVISORY, not a fallback --
-                   // if a front is crossing this outflow, sigma of O(10) is
-                   // what survives it, and the sigma = 0.25 default can push
-                   // the front back and abort the run (see the flame-exit
-                   // table in NSCBC-FlameOutflow/README.md).
+  structure,       // ADVISORY, not a fallback: material structure sat in an
+                   // outflow boundary cell (|dS| > 5% of rho).  A front at
+                   // the boundary wants the flame closures --
+                   // extrap_temperature and beta_s = 0; see
+                   // NSCBC-FlameOutflow/README.md.
   count
 };
 }
@@ -542,16 +282,10 @@ minmod(const amrex::Real a, const amrex::Real b) noexcept
   return (std::abs(a) < std::abs(b)) ? a : b;
 }
 
-// True if a state looks like EB body state rather than fluid.  The boundary
-// functor has no EBCellFlag, so this predicate is how the stencil notices,
-// and it works by non-positive density: the -1 fill of plotfile output
-// (IO.cpp) and the eb_zero_body_state = 1 in-simulation fill are both
-// caught.  PeleC's DEFAULT in-simulation body state is a sampled fluid
-// state -- positive density, indistinguishable from interior data -- which
-// is why read_params makes eb_zero_body_state = 1 mandatory whenever
-// bc_nscbc runs with EB geometry (found by the NSCBC-Acoustic EB test: the
-// counter read zero with a solid seated in the stencil).  Cheap, and it
-// also catches genuinely broken states.
+// True if a state looks like EB body state rather than fluid, detected by
+// non-positive density.  This is why read_params makes eb_zero_body_state = 1
+// mandatory under EB: PeleC's default body state is a sampled fluid state the
+// stencil cannot distinguish from interior data.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE bool
 is_body_state(const amrex::Real s[NVAR]) noexcept
 {
@@ -568,14 +302,10 @@ copy_state(const amrex::Real src[NVAR], amrex::Real dst[NVAR]) noexcept
 }
 
 // ---------------------------------------------------------------------------
-//  Primitive decomposition of one stencil cell.
-//
-//  Temperature is taken from the state rather than recovered with REY2T.  T is
-//  a maintained component of PeleC's conserved state (computeTemp runs after
-//  every update) and using it keeps every EOS call on this path non-iterative,
-//  which matters under SRK.  This is the same choice the existing
-//  characteristic-outflow bcnormal implementations make (see EB-C10/prob.H).
-//  If T is not usable we fall back to the iterative recovery.
+//  Primitive decomposition of one stencil cell.  T is taken from the state
+//  (a maintained component; computeTemp runs after every update), keeping
+//  every EOS call on this path non-iterative -- which matters under SRK --
+//  with the iterative recovery as fallback.
 // ---------------------------------------------------------------------------
 struct CellPrim
 {
@@ -634,29 +364,13 @@ cell_primitives(const amrex::Real s[NVAR]) noexcept
 }
 
 // ---------------------------------------------------------------------------
-//  reaction_dpdt -- the rate of change of pressure at a cell due to chemistry
-//  alone, holding density and total internal energy fixed.
-//
-//  Chemistry conserves mass and, in PeleC's constant-volume reactor, total
-//  internal energy: the formation enthalpies are carried inside e.  So it
-//  changes the pressure entirely through the COMPOSITION,
-//
-//      dp/dt|_react = sum_k (dp/dY_k)|_{rho,e} * wdot_k / rho
-//
-//  For an ideal-gas mixture that derivative is available in closed form,
-//
-//      (dp/dY_k)|_{rho,e} = rho Ru T / W_k  -  (p/T)(e_k / c_v)
-//
-//  giving a mole-change term and the familiar heat-release term:
-//
-//      dp/dt = Ru T sum_k wdot_k/W_k  -  p/(rho T c_v) sum_k e_k wdot_k
-//
-//  For a real-gas EOS there is no such one-liner, and SRK does not implement
-//  the composition derivative at all.  The fallback exploits the fact that
-//  sum_k wdot_k = 0, so the composition perturbation along the reaction path
-//  already preserves sum Y = 1: a single DIRECTIONAL finite difference along
-//  that path gives exactly the required derivative, at the cost of one extra
-//  (rho, e, Y) -> T solve rather than NUM_SPECIES of them.
+//  reaction_dpdt -- dp/dt from chemistry alone at fixed (rho, e).  Chemistry
+//  conserves both, so the effect is purely compositional:
+//      dp/dt = sum_k (dp/dY_k)|_{rho,e} wdot_k / rho
+//            = Ru T sum_k wdot_k/W_k - p/(rho T c_v) sum_k e_k wdot_k
+//  (ideal-gas closed form, gated by C7).  SRK/manifold lack the composition
+//  derivative, so there a single directional finite difference along the
+//  reaction path is used (sum wdot = 0 keeps sum Y = 1 along it).
 // ---------------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
 reaction_dpdt(CellPrim const& q, bool& ok) noexcept
@@ -759,10 +473,9 @@ pack_ghost(
   }
   // Passive families default to a mass-scaled zero-gradient; the caller
   // overwrites them where a target applies.
+#if NUM_ADV > 0
   const amrex::Real ratio =
     (s_N[URHO] > constants::very_small_num()) ? rho / s_N[URHO] : 1.0;
-  amrex::ignore_unused(ratio);
-#if NUM_ADV > 0
   for (int n = 0; n < NUM_ADV; n++) {
     s_ghost[UFA + n] = s_N[UFA + n] * ratio; // per unit mass in ctoprim
   }
@@ -780,28 +493,13 @@ pack_ghost(
 }
 
 // ===========================================================================
-//  apply()
-//
-//  Fill one ghost cell.
-//
-//  s_N, s_Nm1, s_Nm2  interior stencil walking INWARD from the boundary.  The
-//                     caller is responsible for clamping the TANGENTIAL
-//                     components of these indices into the domain, so that the
-//                     fill is a pure function of valid interior data and is
-//                     therefore deterministic and free of any dependence on
-//                     the order in which ghost cells are visited.
-//  n_stencil          how many of the three are usable (3, 2 or 1).  Reduced
-//                     by the caller, and further reduced here if a stencil
-//                     cell turns out to hold EB body state.
-//  dx_normal          cell size along the boundary normal.
-//  idir               boundary-normal direction, 0/1/2.
-//  sgn                +1 on a low-side face, -1 on a high-side face (AMReX
-//                     convention, matching bcnormal).
-//  layer              1 for the ghost cell nearest the domain, 2 for the next,
-//                     and so on.
-//  diag               optional amrex::Long counter array of length
-//                     Diag::count; may be
-//                     null.
+//  apply() -- fill one ghost cell.
+//    s_N, s_Nm1, s_Nm2: interior stencil walking inward; tangential indexing
+//      is the caller's (BCfill.cpp), keeping the fill a deterministic pure
+//      function of data written before the launch.
+//    n_stencil: usable cells (3/2/1), reduced further on EB body state.
+//    idir, sgn: boundary normal and side (+1 lo, -1 hi, as bcnormal).
+//    layer: 1 = nearest the domain.  diag: optional Long[Diag::count].
 // ===========================================================================
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE void
 apply(
@@ -869,8 +567,7 @@ apply(
   // ---- 2. Regimes with an exact answer ----------------------------------
   if (std::abs(mach) >= 1.0) {
     if (mach >= 1.0) {
-      // Supersonic outflow: no characteristic can carry information inward.
-      // Zero-gradient is exact, not an approximation.
+      // Supersonic outflow: zero-gradient is exact, not an approximation.
       bump(Diag::supersonic);
       copy_state(s_N, s_ghost);
       return;
@@ -898,10 +595,9 @@ apply(
   // ---- 3. Direction sanity ----------------------------------------------
   const bool outflow_face = (tgt.type == Type::outflow);
   if (outflow_face && (u_out_N < 0.0)) {
-    // Transient reversal at an outflow.  Do not fight the flow with an
-    // outflow model that assumes the lambda_0 family is leaving; fall back to
-    // an ambient-pressure closure that keeps the interior composition and
-    // tangential velocity so a grazing flow is not arrested.
+    // Transient reversal at an outflow: fall back to an ambient-pressure
+    // closure keeping interior composition and tangential velocity, so a
+    // grazing flow is not arrested.
     bump(Diag::reversed);
     amrex::Real T_g = qN.T, e_g = 0.0;
     eos.RYP2T(qN.rho, qN.Y, tgt.p, T_g);
@@ -917,9 +613,8 @@ apply(
     return;
   }
   if (!outflow_face && (u_out_N > 0.0)) {
-    // Outflow through a face configured as an inflow.  The inflow model would
-    // impose D+NUM_SPECIES+1 conditions on a point that admits one; that is
-    // ill-posed.  Zero-gradient and count it.
+    // Outflow through a configured inflow would impose D+NUM_SPECIES+1
+    // conditions where one is admitted; zero-gradient and count it.
     bump(Diag::reversed);
     copy_state(s_N, s_ghost);
     return;
@@ -945,19 +640,10 @@ apply(
   const amrex::Real Rp_g = Rp_N + static_cast<amrex::Real>(layer) * dRp;
 
   // ---- 5. Incoming acoustic invariant, R_- ------------------------------
-  // lambda_- = u_out - c < 0 always (subsonic), so R_- is always modelled.
-  //
-  //     L_in       = K (phi - phi_target)
-  //     dR_-/dn    = -L_in / (lambda_- rho c) = L_in / ((c - u_out) rho c)
-  //     R_-,ghost  = R_-,N + layer dx dR_-/dn
-  //
-  // Sign check, outflow: phi = p, K > 0.  p_N > p_target gives dR_-/dn > 0,
-  // hence R_-,ghost > R_-,N, and since dp/dR_- = -rho c / 2 the ghost pressure
-  // falls: the boundary is pulled toward the target.  Anchoring, as intended.
-  //
-  // Sign check, inflow: phi = u_out with a leading minus (see below).  u_out_N
-  // above the target gives dR_-/dn < 0, hence a smaller R_-,ghost, and since
-  // du_out/dR_- = +1/2 the ghost normal velocity falls toward the target.
+  // lambda_- < 0 always (subsonic), so R_- is always modelled.  Sign checks:
+  // outflow, p_N > p_target => dR_-/dn > 0 and (dp/dR_- = -rho c/2) the
+  // ghost pressure falls toward target; inflow, u above target => smaller
+  // R_-,ghost and the ghost normal velocity falls toward target.
   const amrex::Real Rm_N = u_out_N - qN.p / rho_c;
   const amrex::Real lambda_in = c_N - u_out_N; // > 0, magnitude of the speed
   const amrex::Real one_m_M2 =
@@ -1025,11 +711,10 @@ apply(
     const amrex::Real S_Nm2 = qNm2.rho - qNm2.p * inv_c2;
     const amrex::Real dS = minmod(S_N - S_Nm1, S_Nm1 - S_Nm2);
 
-    // The transit guard.  Material structure sitting in the outflow boundary
-    // cell is the configuration for which no dial at its default survives a
-    // crossing (the flame-exit table in NSCBC-FlameOutflow/README.md): count
-    // it and let nscbc_report_diagnostics() say so.  5% of rho per cell is
-    // well above acoustic or roundoff content and well below any front.
+    // The transit guard: count material structure in the outflow boundary
+    // cell so nscbc_report_diagnostics() can advise the flame closures
+    // (extrap_temperature, beta_s).  5% of rho per cell is well above
+    // acoustic or roundoff content and well below any front.
     if ((layer == 1) && (std::abs(dS) > 0.05 * qN.rho)) {
       bump(Diag::structure);
     }
@@ -1077,25 +762,13 @@ apply(
         bump(Diag::source_drop);
       }
     }
-    // There is deliberately NO diffusive source term here, and that is a
-    // measured decision, not an omission.  A dp/dt|_diffusion of the boundary
-    // cell -- normal conduction and mixture-averaged species diffusion of the
-    // resolved fields, converted through the EOS -- was built, verified exact
-    // on quadratic profiles, and measured: with real conduction in the 1-D
-    // driver the boundary error is 887 dyn/cm2 under the entropy closure,
-    // 104 under extrap_temperature, and adding the modelled term moves 104 to
-    // -911; in PeleC's flame-outflow at sigma = 1 it moves +1200 to +1771.
-    // The ghost-cell form does not HAVE the flux-form's viscous-condition
-    // gap: the diffusion operator reads these ghost cells, so a correct
-    // ghost closure (extrap_temperature, gated by C8 and C12) already
-    // carries the diffusive physics, and an amplitude-side term counts it
-    // twice.  See check C12 in Verification/NSCBC1D.
-    //
-    // Caveat as of Phase 0: every number quoted above was measured with the
-    // reaction source subtracted rather than added (see beta_s), so the
-    // double-count that condemned the diffusive term may have been the sign
-    // bug wearing its clothes.  C12 is re-run under the corrected sign before
-    // this decision stands or falls.
+    // There is deliberately NO diffusive source term on L_in.  The
+    // ghost-cell form does not have the flux-form's viscous-condition gap:
+    // the diffusion operator reads these ghost cells, so a correct ghost
+    // closure (extrap_temperature, gated by C8 and C12) already carries the
+    // diffusive physics, and an amplitude-side term counts it twice
+    // (measured: it moves the C12 driver error 104 -> -911).  Re-verify
+    // against C12 before revisiting.
     Rm_g = Rm_N + static_cast<amrex::Real>(layer) * dRm +
            static_cast<amrex::Real>(layer) * dx_normal * L_in /
              (lambda_in * rho_c);
@@ -1129,8 +802,7 @@ apply(
   amrex::Real Y_g[NUM_SPECIES];
 
   if (outflow_face) {
-    // Entropy invariant S = rho - p/c^2, extrapolated with the same limited
-    // linear form as R_+.  With a zero slope this reduces exactly to the
+    // Entropy invariant extrapolated like R_+; zero slope reduces to the
     // linearised isentrope rho_g = rho_N + (p_g - p_N)/c^2.
     const amrex::Real inv_c2 = 1.0 / (c_N * c_N);
     const amrex::Real S_N = qN.rho - qN.p * inv_c2;
@@ -1154,9 +826,7 @@ apply(
     const amrex::Real S_g = S_N + fl * dS;
     rho_g = S_g + p_g * inv_c2;
 
-    // Temperature closure: extrapolate T on the same limited slope and let rho
-    // follow from the EOS below, so that the face temperature gradient is the
-    // interior one rather than a by-product of the acoustic algebra.
+    // Temperature closure: T on the same limited slope; rho from the EOS.
     amrex::Real dT = 0.0;
     if (prm.extrap_temperature && linear && qNm1.ok && qNm2.ok) {
       dT = minmod(qN.T - qNm1.T, qNm1.T - qNm2.T);
@@ -1207,17 +877,11 @@ apply(
       eos.RTY2E(rho_g, T_g, Y_g, e_g);
     }
   } else {
-    // Inflow.  A single dimensionless nudge factor is shared by the
-    // temperature and the tangential velocities: both ride lambda_0, whose
-    // magnitude is |u_out|.
-    //
-    //     nu = layer dx relax_t c / (L_ref |u_out|)   clamped to [0, 1]
-    //
-    // The legacy Fortran used ratios rho c R_specific / L for temperature and
-    // c / L for tangential velocity, which are not dimensionally comparable
-    // and are why relax_T had to be given a negative value.  One consistent
-    // factor, applied as an explicit move toward the target, cannot get the
-    // sign wrong.
+    // Inflow.  One dimensionless nudge factor shared by temperature and the
+    // tangential velocities -- both ride lambda_0, magnitude |u_out|:
+    //     nu = layer dx relax_t c / (L_ref |u_out|), clamped to [0, 1],
+    // applied as an explicit move toward the target so no sign convention
+    // can go wrong.
     const amrex::Real u_mag =
       amrex::max<amrex::Real>(std::abs(u_out_N), constants::smallu());
     const amrex::Real nu = amrex::min<amrex::Real>(

@@ -118,51 +118,28 @@ struct PCHypFillExtDir
 
       // Tangential index bounds for the stencils below.
       //
-      // In a WALL-type tangential direction every index is clamped into the
-      // domain, so that only valid interior cells are ever read.
-      //
-      // A PERIODIC tangential direction is governed by a protocol this fill
-      // does not own.  amrex's StateDataPhysBCFunct fills a box that hangs
-      // out of the domain in a periodic direction in two passes: the functor
-      // runs on the full FAB, and then, per periodic direction, the corner
-      // ghosts (outside in the normal AND the periodic direction) are
-      // RECOMPUTED on a temporary strip FAB holding only their image rows --
-      // the first `ng` rows inside the seam -- and copied back over whatever
-      // the first pass wrote.  Two consequences:
-      //
-      //   * The corner ghosts ARE built from image-row data, which is what
-      //     periodicity wants; nothing here needs to (or can) arrange that.
-      //   * The fill of a boundary cell within `ng` rows of a periodic seam
-      //     happens TWICE, once on the full FAB and once on the strip, and
-      //     the final array is periodic only if both passes compute the same
-      //     value.  The strip cannot see past its own rows, so the shared
-      //     stencil is the BAND of `ng` rows inside the seam: one-sided at
-      //     the seam row and at the band's inner edge, centred in between.
-      //     A centred difference ACROSS the seam is unachievable -- the row
-      //     beyond the seam does not exist in the strip -- and either
-      //     clamping at the domain edge (the pre-Phase-0 behaviour) or
-      //     wrapping through the FAB's resident images (the obvious fix)
-      //     disagrees with the strip and leaves the filled array aperiodic.
-      //     The wrap gate (nscbc_check_periodic_wrap) measures exactly this.
+      // Wall-type tangential direction: clamp into the domain, so only valid
+      // interior cells are read.  PERIODIC tangential direction: governed by
+      // amrex's corner protocol (StateDataPhysBCFunct), which recomputes the
+      // corner ghosts on a temporary strip FAB holding only their image band
+      // -- the first ng rows inside the seam -- and copies them back over the
+      // direct fill.  A seam-adjacent cell is therefore filled TWICE, on two
+      // different FABs, and the array is periodic only if both passes agree,
+      // which pins the stencil to the BAND the strip can see: one-sided at
+      // the seam row and the band's inner edge, centred between.  A centred
+      // difference ACROSS the seam is unachievable under the protocol -- both
+      // the domain clamp and the obvious wrap leave the filled array
+      // aperiodic (nscbc_check_periodic_wrap measures exactly this), so do
+      // NOT "fix" this back to a wrap.
       //
       // The band height is the fill's ghost width, read off this FAB as its
-      // overhang in the NORMAL direction on the side being filled.  That and
-      // not the tangential overhang, for a decomposition reason: a box that
-      // does not touch the seam has no tangential overhang at all, yet its
-      // seam-adjacent cells must still compute the band-restricted stencil,
-      // or the same physical cell would be centred in one decomposition and
-      // one-sided in another.  The normal overhang is the mf's ghost width on
-      // every FAB alike -- amrex's corner strip included, which is grown in
-      // the normal direction even though it is only the band tall in the
-      // periodic one -- so it is the decomposition-invariant choice.
-      //
-      // Band membership is decided on the WRAPPED index and the band is then
-      // shifted back, so a ghost outside the domain in the periodic direction
-      // (dead in 2-D, where the strip overwrites it, but live at a 3-D edge,
-      // which no strip revisits) reads the image rows of the band its wrapped
-      // image reads, and the two agree to the bit.  A ghost region wider than
-      // the period has no consistent band; the stencil then degrades to the
-      // FAB clamp, as it must.
+      // overhang in the NORMAL direction: decomposition-invariant (a box away
+      // from the seam has no tangential overhang but the same normal one, and
+      // amrex's strip is grown in the normal direction too).  Band membership
+      // is decided on the WRAPPED index and shifted back, so 3-D edge ghosts
+      // -- which no strip revisits -- read the image rows of the band their
+      // wrapped image reads.  A ghost region wider than the period has no
+      // consistent band and degrades to the FAB clamp.
       const int ng_fill = (sgn > 0) ? (domlo[idir] - fab_lo[idir])
                                     : (fab_hi[idir] - domhi[idir]);
       auto tang_range = [&](const int d, const int j0, int& tlo, int& thi) {
@@ -581,27 +558,15 @@ PeleC::nscbc_check_fine_faces() const
 }
 
 // ---------------------------------------------------------------------------
-//  Periodic-wrap gate.
-//
-//  The characteristic fill builds each ghost cell from a tangential stencil.
-//  In a periodic tangential direction that stencil has to wrap, and until
-//  Phase 0 it clamped into the domain instead.  Nothing on the branch could
-//  see it: every 2-D regression case but the circular pulse is periodic in the
-//  direction tangential to its NSCBC faces, so every 2-D baseline contained
-//  it, and a control whose state is uniform along the boundary satisfies the
-//  broken fill exactly as well as the fixed one.
-//
-//  The identity that catches it needs no reference solution.  If the fill is
-//  periodic in d, a ghost cell and its image n_d cells away were built from
-//  bitwise-identical data by identical arithmetic and must agree to the last
-//  bit.  Under the clamp they do not: every ghost above the domain is built
-//  from row domhi, and its image from row j - n_d.
-//
-//  Reported rather than merely asserted.  A pass means nothing if the state
-//  did not vary along the boundary, so the tangential spread of the boundary
-//  row -- real data, independent of the fill -- is printed beside the
-//  mismatch, and a decomposition that put no image pair in one FAB says so
-//  instead of claiming a clean result.
+//  Periodic-wrap gate.  If the fill is periodic in d, a ghost cell and its
+//  image one period away were built from bitwise-identical data by identical
+//  arithmetic and must agree to the last bit; under a clamped or naively
+//  wrapped tangential stencil they do not (see tang_range above).  Reported
+//  rather than merely asserted, because the ways this check can be vacuous
+//  are the ways the defect hid: the tangential spread of the boundary row is
+//  printed beside the mismatch (a pass on a row uniform along the boundary
+//  gates nothing), and a decomposition with no image pair in one FAB says
+//  NOT CHECKED instead of passing.  Exercised by NSCBC-COVO/nscbc-wrapgate.inp.
 // ---------------------------------------------------------------------------
 void
 PeleC::nscbc_check_periodic_wrap()

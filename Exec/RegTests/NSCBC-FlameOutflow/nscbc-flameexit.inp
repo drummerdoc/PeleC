@@ -44,7 +44,6 @@ pelec.bc_nscbc_extrap_material    = 1
 
 prob.pamb          = 1013250.0
 prob.phi_in        = -0.5
-prob.probtype      = 0
 prob.u_ratio       = 40.0
 prob.sheet_x       = 0.7
 prob.wrinkle_amp   = 0.04

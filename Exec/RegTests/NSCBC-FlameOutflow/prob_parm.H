@@ -13,11 +13,7 @@ struct ProbParmDevice
   amrex::Real vn_in = 0.2;
   amrex::Real pertmag = 0.0;
 
-  // 0 = wrinkled flame sheet advected out through the outflow (default)
-  // 1 = V-flame anchored on an inlet hot spot
-  int probtype = 0;
-
-  // probtype 0: mean position of the flame sheet as a fraction of the domain
+  // Mean position of the flame sheet as a fraction of the domain
   // length, and the wrinkle amplitude and wavenumber.  The default parks the
   // mean sheet position exactly ON the outflow plane, so that half the boundary
   // is burnt, half is fresh, and the reaction zone sits inside the boundary
@@ -39,38 +35,21 @@ struct ProbParmDevice
   // rate that depends on the domain length -- cannot contaminate the result.
   int nscbc_inflow = 1;
 
-  // Mean inlet speed as a multiple of the laminar flame speed.  For probtype 0
-  // the only requirement is U > S_L so the sheet drifts downstream and needs no
-  // anchor; 2 is the natural choice.  For probtype 1 it also sets the V
-  // half-angle through sin(alpha) = S_L / U, so it controls both how wide the V
-  // opens and how obliquely the flame meets the outflow -- large enough and the
-  // branches leave through the downstream face rather than reaching the
-  // transverse (periodic) boundary.
+  // Mean inlet speed as a multiple of the laminar flame speed.  The only
+  // requirement is U > S_L so the sheet drifts downstream and needs no
+  // anchor; 2 is the natural choice.
   amrex::Real u_ratio = 2.0;
 
   // Laminar flame speed, taken from the inlet velocity of the PMF profile.
-  amrex::Real s_L = 0.0;   // filled by amrex_probinit
-  amrex::Real u_in = 0.0;  // = u_ratio * s_L
-  amrex::Real alpha = 0.0; // V half-angle [rad]
-
-  // Ignition/anchoring hot spot on the inlet plane: fresh reactants held at
-  // T_hot over |y - y_apex| < r_hot.  It is what keeps the V attached over a
-  // long run; over the short runs used for the boundary measurement the flame
-  // barely moves and the anchor is incidental.
-  amrex::Real T_hot = 1500.0;
-  amrex::Real r_hot = 0.15;
-
-  // Apex position, as a fraction of the domain in each direction.
-  amrex::Real apex_x = 0.08;
-  amrex::Real apex_y = 0.5;
+  amrex::Real s_L = 0.0;  // filled by amrex_probinit
+  amrex::Real u_in = 0.0; // = u_ratio * s_L
 
   // Coordinate of the flame in the 1-D PMF profile: the initial condition maps
-  // that profile onto the V through the signed normal distance s, evaluating
-  // it at (pmf_flame_loc - s).
+  // that profile onto the sheet through the signed normal distance s,
+  // evaluating it at (pmf_flame_loc + s).
   amrex::Real pmf_flame_loc = 3.0;
 
   amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> L = {{1.0}};
-  amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> xapex = {{0.0}};
   int pmf_N = 0;
   int pmf_M = 0;
   bool pmf_do_average = false;
