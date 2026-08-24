@@ -50,8 +50,9 @@ full reasoning — the commit messages are the lab notebook.
    signals. Driver first (add the sigma-from-CLI + T1/T3/T5 duct modes together), PeleC after.
 2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
    wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
-3. **T7 mini-SydGex** — vented chamber, vent-into-plenum vs boundary-at-vent; reuses the
-   flame-exit machinery.
+3. **T7 mini-SydGex** — BUILT as `Exec/RegTests/NSCBC-Chamber` (Lesson 9 is runnable);
+   the two-variant production comparison and its table remain to be run and written up.
+   Follow-ups: laterally-expanding plenum and the baffle (both need EB).
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and
