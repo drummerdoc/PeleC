@@ -68,24 +68,26 @@ Errors against the shielded reference at t = 2.4×10⁻⁵ s (≈ 3.4 τ_relax a
 acoustic reflection at the same σ from `Verification/NSCBC1D`. All
 characteristic rows: β = 0.5, order 2, hard-Dirichlet inlet. `eT` is
 `bc_nscbc_extrap_temperature`. Measured after the Phase-0 reaction-source sign
-fix (`NSCBC.H`, `L_in += (1−β_s) S_p`), with the shipped (clamped) tangential
-stencil; the pre-fix table is in the git history, and the one configuration
-the fix does not touch reproduces it — σ = 1, eT = 0, β_s = 1 reads +2065
-before and after.
+fix (`NSCBC.H`, `L_in += (1−β_s) S_p`) and the soft outflow-reversal closure
+(pressure relaxed, not pinned, on transient backflow — found by
+`NSCBC-Chamber`); the pre-fix tables are in the git history. Every
+recommended-recipe row is untouched by the reversal change to the bit — those
+configurations never reverse — while the failure-mode rows, whose piled-up
+structure sloshes the boundary, shift 2–6%.
 
 | outflow | σ | eT | β_s | mean Δp | L2(Δp) | L2(Δp) bl | R [%] |
 |---|---|---|---|---|---|---|---|
 | hard `p = p_amb` | — | — | — | −527 | 586 | 631 | — |
-| characteristic | 0.25 | 0 | 1 | +2193 | 2214 | 2202 | 0.76 |
-| characteristic | 0.25 | 0 | 0 | +1467 | 1510 | 1729 | 0.76 |
-| characteristic | 0.25 | 1 | 1 | +2026 | 2052 | 2141 | 0.76 |
+| characteristic | 0.25 | 0 | 1 | +2252 | 2273 | 2305 | 0.76 |
+| characteristic | 0.25 | 0 | 0 | +1383 | 1420 | 1564 | 0.76 |
+| characteristic | 0.25 | 1 | 1 | +2066 | 2092 | 2201 | 0.76 |
 | **characteristic** | **0.25** | **1** | **0** | **−507** | **568** | **638** | **0.76** |
-| characteristic | 1 | 0 | 1 | +2065 | 2088 | 2136 | 2.56 |
-| characteristic | 1 | 0 | 0 | +1089 | 1128 | 1225 | 2.56 |
-| characteristic | 1 | 1 | 1 | +1772 | 1799 | 1886 | 2.56 |
+| characteristic | 1 | 0 | 1 | +2009 | 2031 | 2046 | 2.56 |
+| characteristic | 1 | 0 | 0 | +1023 | 1059 | 1083 | 2.56 |
+| characteristic | 1 | 1 | 1 | +1742 | 1768 | 1821 | 2.56 |
 | characteristic | 1 | 1 | 0 | −522 | 582 | 646 | 2.56 |
-| characteristic | 16 | 0 | 1 | +49 | 256 | 135 | 28.1 |
-| characteristic | 16 | 0 | 0 | −281 | 377 | 394 | 28.1 |
+| characteristic | 16 | 0 | 1 | +39 | 255 | 142 | 28.1 |
+| characteristic | 16 | 0 | 0 | −282 | 378 | 397 | 28.1 |
 | **characteristic** | **16** | **1** | **1** | **−139** | **286** | **270** | **28.1** |
 | characteristic | 16 | 1 | 0 | −511 | 570 | 618 | 28.1 |
 
@@ -98,7 +100,7 @@ What the corrected table says, in order of importance.
 
 **β_s = 0 now earns its keep, and the old table was measuring the bug.** With
 the sign corrected, switching the reaction source on cuts the error by a third
-at σ = 0.25 (2193 → 1467) and by half at σ = 1 (2065 → 1089). Under the old
+at σ = 0.25 (2252 → 1383) and by half at σ = 1 (2009 → 1023). Under the old
 sign the same switch did nothing (+2065 → +2074), because it was *doubling*
 the heat-release push and the visible residue was only the difference between
 2 S_p/K and the σ-dominated rest. The Sutherland–Kennedy cancellation this
@@ -145,8 +147,8 @@ At σ = 1 (t = 10⁻⁵ s, domain-mean pressure rise):
 
 **Half the error is there with chemistry switched off.** A purely non-reacting
 density front already biases the boundary; reactions roughly double it. That
-is why β_s = 0 alone halves the σ = 1 error rather than removing it (2065 →
-1089 in the table above), and why extrap_temperature — the closure that lets
+is why β_s = 0 alone halves the σ = 1 error rather than removing it (2009 →
+1023 in the table above), and why extrap_temperature — the closure that lets
 the ghosts carry the front's diffusive structure — is the other half of the
 recipe.
 
@@ -183,7 +185,7 @@ tell the two apart.
 
 Two checks that the formula is the right one rather than a plausible story:
 
-* It predicts a σ⁻¹ trend. Measured (β_s = 1, eT = 0): 2065 → 256 for
+* It predicts a σ⁻¹ trend. Measured (β_s = 1, eT = 0): 2009 → 255 for
   σ = 1 → 16, and 2074 → 1450 → 218 for σ = 1 → 4 → 16 in the pre-fix table,
   whose β_s = 0 rows differ from β_s = 1 by under 1%.
 * It predicts the offset is **grid-converged**, because δR₊ is a per-cell slope
@@ -283,7 +285,7 @@ follows from the EOS — so the face gradient is the interior one, exactly. A
 uniform state still comes back to 2×10⁻¹⁶, so nothing hyperbolic is given up.
 
 Its measured effect is in the main matrix above: at β_s = 1 it buys 14% at
-σ = 1 (2065 → 1772) and trades mean for near-boundary structure at σ = 16
+σ = 1 (2009 → 1742) and trades mean for near-boundary structure at σ = 16
 (+49 → −139 mean, but L2(dT) in the boundary layer 4.6 → 2.7); combined with
 the corrected β_s = 0 it is half of the closure pair that removes the
 σ-dependence outright. (An earlier version of this section quoted −69% at
@@ -354,12 +356,12 @@ fresh stream at (U, p_amb, T_in). `exit_metrics.py` tracks both.
 
 All characteristic rows below: β = 0.5, order 2, `extrap_temperature = 1`
 unless marked bare, `extrap_material = 0` (its transit behaviour is settled
-below and did not change). Re-measured after the Phase-0 sign fix, with the
-shipped (clamped) tangential stencil; the old table's characteristic rows all
-carried `beta_s = 0` under the inverted sign — a doubled reaction source —
-and are superseded. The two controls reproduce: hard was (−200, +1.2, 0.01)
-and reads (−147/−203, +1.2, 0.01); σ = 16 + eT ends at +8.5, 0.19 against
-+8.5, 0.20 before.
+below and did not change). Re-measured after the Phase-0 sign fix and the
+soft outflow-reversal closure, with the shipped (clamped) tangential stencil.
+Every row that completed under the old closure reproduces **to the digit** —
+a healthy transit never reverses the boundary, so the reversal branch never
+runs — and the rows that change are exactly the ones the old hard reversal
+pin was crashing or masking (see below).
 
 | outflow | transit peak Δp | post-exit extreme | front | post-exit residual Δp, rms(u−U) |
 |---|---|---|---|---|
@@ -368,10 +370,10 @@ and reads (−147/−203, +1.2, 0.01); σ = 16 + eT ends at +8.5, 0.19 against
 | **σ = 16, β_s = 0** | **−110** | −432 | on schedule | +8.5, 0.19 |
 | σ = 1, β_s = 1 | +9119 | +15926 | slightly late | +134, 3.5 |
 | σ = 1, β_s = 0 | −1224 | −4710 | on schedule | +133, 3.5 |
-| σ = 0.25, β_s = 1 | +24523 | +40116, climbing | **BLOCKED: stalls, pushed back** | never exits |
+| σ = 0.25, β_s = 1 | +24523 | +152000, climbing | **BLOCKED: stalls, pushed back** | never exits |
 | σ = 0.25, β_s = 0 | +2422 | −8818, recovering | on schedule | −250, 6.7 |
-| σ = 0.25 bare (eT = 0), β_s = 1 | +36563 | — | pushed backwards | **NaN at t = 1.9×10⁻⁴** |
-| σ = 0.25 bare (eT = 0), β_s = 0 | +23419 | — | exits, slow, wrinkle destroyed | **NaN at t = 4.1×10⁻⁴** |
+| σ = 0.25 bare (eT = 0), β_s = 1 | +65038 | — | pushed backwards, domain refills with burning | never recovers; maxT climbing |
+| σ = 0.25 bare (eT = 0), β_s = 0 | +23419 | — | exits, slow, wrinkle destroyed; remnant re-anchors | +34000 standing offset |
 
 Wrinkle amplitude holds at ≈ 0.034 in every completing run while the full 32
 rows track the front, decaying only as rows leave the domain, so the wrinkle
@@ -390,20 +392,28 @@ event the relaxation has no model for; β_s = 0 hands the incoming wave the
 exact chemical dp/dt, so the boundary passes the expansion instead of
 integrating it into the ramp that used to push the front back.
 
-**The blocked state is what the old crash looks like with the closures half
-on.** σ = 0.25 with eT = 1 but β_s = 1 no longer NaNs — the temperature
-closure keeps the diffusive fluxes sane — but the ramp still builds to +0.04
-atm, stalls the front near x = 0.55 and pushes it back upstream; at t = 6×10⁻⁴
-the flame is still in the domain and the ramp is still climbing. Survival of
-the *run* is not survival of the *physics*.
+**The blocked state is the failure the closures half-on produce, and the
+soft reversal closure reports it honestly.** σ = 0.25 with eT = 1 but
+β_s = 1 builds a ramp that stalls the front near x = 0.55 and pushes it back
+upstream; at t = 6×10⁻⁴ the flame is still in the domain and the ramp has
+climbed to +0.15 atm. (Under the old hard reversal pin this row read +0.04
+atm — the pin was clamping the ghosts to ambient during the backflow and
+artificially capping a state that is in fact running away.) Survival of the
+*run* is not survival of the *physics*.
 
-**The bare default still destroys the run, with either β_s.** Term off it is
-the old crash (+37000, front pushed backwards, NaN at 1.9×10⁻⁴). With the
-corrected source it gets further — the front actually exits, slowly, wrinkle
-destroyed — and then the emptied domain NaNs at 4.1×10⁻⁴ anyway: without the
-temperature closure the boundary's diffusive fluxes are wrong through the
-whole transit and the σ = 0.25 relaxation cannot pay that debt back. eT is
-the survival flag; β_s is the fidelity flag.
+**The bare default still destroys the physics, with either β_s — it just no
+longer NaNs.** Both bare rows used to die (1.9×10⁻⁴ and 4.1×10⁻⁴): the front
+pushed back through the outflow reverses it, and the old closure answered
+backflow with a hard ambient pin whose pressure discontinuity fed NaNs — the
+same defect `NSCBC-Chamber` found in the vent ring-down. Under the soft
+closure both runs reach 6×10⁻⁴ intact and show what the bare configuration
+actually does: with β_s = 1 the front is driven backwards and the domain
+refills with burning gas (maxT past 2100 and climbing); with β_s = 0 the
+front exits slowly with its wrinkle destroyed, then a remnant re-anchors at
+the boundary and holds a +0.034 atm standing offset. Without the temperature
+closure the boundary's diffusive fluxes are wrong through the whole transit
+and the σ = 0.25 relaxation cannot pay that debt back. eT is the fidelity
+flag for the transit; β_s is the fidelity flag for the source.
 
 **Post-exit anchoring is σ's job alone.** After the flame leaves, β_s has
 nothing to act on and both β_s rows land on identical residuals (+133 at

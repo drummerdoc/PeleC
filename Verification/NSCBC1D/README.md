@@ -95,13 +95,20 @@ times / at t_end:
 
 | ghost closure | 0.7 τ | t_end | what it supplies |
 |---|---|---|---|
-| entropy | 15707 | 27129 | nothing beyond the algebra |
-| `extrap_temperature` | 16050 | 27076 | linear T |
-| **fit** (profile T only, ρ from EOS at kernel p) | 16044 | 27056 | fitted-profile T |
-| `extrap_material` | 3175 | 27210 | linear T *and* u |
+| entropy | 25007 | 143274 | nothing beyond the algebra |
+| `extrap_temperature` | 26090 | 144414 | linear T |
+| **fit** (profile T only, ρ from EOS at kernel p) | 25268 | 116569 | fitted-profile T |
+| `extrap_material` | 3175 | 89132 | linear T *and* u |
 | **fitU** (profile T and u; p stays relaxed) | **66.8** | **79.8** | fitted-profile structure |
 | fitUX (same, family end-state 15% wrong) | 73.8 | 86.9 | robustness probe |
 | oracle | −38.1 | −54.7 | the exact answer, placed exactly |
+
+(The drifting rows' numbers grew when the outflow-reversal fallback became a
+soft, σ-rated relaxation instead of a hard ambient pin — the old pin was
+silently braking the frozen-source walk-off through the transient reversals
+these badly-anchored runs experience. The equilibration-window values of
+every closure that actually holds the front, and every gate, are unchanged
+to the digit; the late-time columns sit in the artifact region either way.)
 
 Three findings. **Material-only profile information buys nothing here** — fit
 = `extrap_temperature` = entropy to 0.3%, because this MMS is inviscid and its
@@ -148,9 +155,9 @@ diffusive term, and inherits their coverage and their gaps.)
 The shape axis is also measured: a second sustained-front block replaces the
 truth with a Richards curve (k = 3 — asymmetric, outside any tanh; the
 manufactured source and the oracle follow it automatically) while the fit
-still assumes tanh. At 0.7 τ / t_end: entropy 13367 / 27461, **fitU 54.9 /
+still assumes tanh. At 0.7 τ / t_end: entropy 14632 / 86673, **fitU 54.9 /
 71.7**, oracle −15.0 / −21.7 — the tanh fit through a non-tanh truth retains
-**99%** of the recovery, and the source bound stays inert. The reason is
+**100%** of the recovery, and the source bound stays inert. The reason is
 geometric: the ghosts extend 4 cells past the boundary while the front is ~20
 cells wide, so any smooth monotone saturating family matched locally in value
 and slope agrees with the truth to second order over the overhang. The

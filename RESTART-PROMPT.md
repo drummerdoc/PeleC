@@ -36,6 +36,13 @@ full reasoning — the commit messages are the lab notebook.
 * `extrap_material` is for fronts that SIT, never during a transit.
 * Determinism (decomposition, MPI, restart) is bit-identical and must stay so; the fill is a
   pure function of the interior state — no boundary history.
+* Outflow reversal (transient backflow through an outflow) uses a soft σ-rated pressure
+  relaxation in the ghosts, continuous through u = 0 — NOT a pin to ambient. The old hard pin
+  NaN'd the first NSCBC-Chamber production run at 4.08 ms (vent breathing during ring-down)
+  and was the cause of both old NaN rows in the flame-exit table. Every previously-completing
+  table row in the suite reproduces to the digit under the new closure (healthy runs never
+  reverse); only failure-mode rows shifted, and all READMEs carry post-fix numbers. A
+  sustained-recirculation gate for this branch is still queue item 2.
 * C11x (driver, reported not gated): profile-fit ghost closure (fitU + source-consistency
   bound) reaches ~oracle level on a sustained front, releases unsustainable structure, robust
   to 15% end-state and full shape distortion of the family. 2-3D candidate; open items in
@@ -60,9 +67,10 @@ full reasoning — the commit messages are the lab notebook.
    signals. Driver first (add the sigma-from-CLI + T1/T3/T5 duct modes together), PeleC after.
 2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
    wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
-3. **T7 mini-SydGex** — BUILT as `Exec/RegTests/NSCBC-Chamber` (Lesson 9 is runnable);
-   Marc is running the two-variant production comparison on a bigger machine (launched
-   2026-08-24). When those plotfiles come back: process with `chamber_metrics.py`
+3. **T7 mini-SydGex** — BUILT as `Exec/RegTests/NSCBC-Chamber` (Lesson 9 is runnable).
+   Marc's first vent production run found the reversal-pin defect (fixed; see State) and
+   its data is discarded; BOTH variants are to be regenerated with a post-fix executable
+   (2026-08-24). When those plotfiles come back: process with `chamber_metrics.py`
    (`--xvent 1.2`), build the peak-aligned trace difference / V̇ balance / ring-down
    table into the case README's Status section, and consider the σ = 16 ring-down
    variant the README names. Follow-ups: laterally-expanding plenum and the baffle

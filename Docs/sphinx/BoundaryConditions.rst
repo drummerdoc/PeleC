@@ -165,11 +165,11 @@ comparison region, so the difference is the outflow's own error. :math:`R` is th
    Outflow                         :math:`\sigma`   ``eT``  :math:`\beta_s`   mean :math:`\Delta p`   :math:`R` [%]
    ==============================  ==============  ======  ================  =====================  =============
    hard ``p = p_amb``              --              --      --                --527                  --
-   characteristic                  0.25            0       1                 +2193                  0.76
+   characteristic                  0.25            0       1                 +2252                  0.76
    characteristic                  0.25            1       0                 **--507**              0.76
-   characteristic                  1               0       1                 +2065                  2.56
+   characteristic                  1               0       1                 +2009                  2.56
    characteristic                  1               1       0                 --522                  2.56
-   characteristic                  16              0       1                 **+49**                28.1
+   characteristic                  16              0       1                 **+39**                28.1
    characteristic                  16              1       0                 --511                  28.1
    ==============================  ==============  ======  ================  =====================  =============
 
@@ -219,7 +219,10 @@ In an outward-normal frame the wave speeds are :math:`u_n - c`, :math:`u_n` (wit
 * **Supersonic inflow** is a full Dirichlet condition.
 
 The implementation dispatches on the local Mach number and handles all of these, including transient flow reversal
-through a face, without any user intervention.
+through a face, without any user intervention. A reversed outflow (transient backflow, as in a chamber ringing
+down through its vent) keeps the same soft treatment as the forward case — the ghost pressure relaxes toward the
+target at the :math:`\sigma`-rated strength rather than being pinned to it, so the closure is continuous through
+:math:`u = 0`.
 
 Controls
 """"""""
@@ -343,10 +346,12 @@ boundary cells — and the closures are what carry it:
   :math:`\sigma` **measured** (0.25, 1, 16), and the transit disturbance falls 7–10× against :math:`\beta_s = 1` at
   the same :math:`\sigma`. At :math:`\sigma = 16` the characteristic boundary is quieter during the crossing than
   the hard Dirichlet.
-* ``extrap_temperature`` is the *survival* flag and :math:`\beta_s` the *fidelity* flag: without ``eT`` the run
-  dies with either :math:`\beta_s` (the boundary's diffusive fluxes are wrong through the whole transit); with
-  ``eT`` but :math:`\beta_s = 1` at :math:`\sigma = 0.25` the run survives while the physics fails — the pressure
-  ramp stalls the front and pushes it back upstream.
+* ``extrap_temperature`` carries the transit and :math:`\beta_s` the source: without ``eT`` the physics is
+  destroyed with either :math:`\beta_s` (the boundary's diffusive fluxes are wrong through the whole transit — the
+  front is pushed backwards or its remnant re-anchors at the boundary); with ``eT`` but :math:`\beta_s = 1` at
+  :math:`\sigma = 0.25` the pressure ramp stalls the front and pushes it back upstream. The runs themselves no
+  longer die: the old NaNs were the hard outflow-reversal pin, since replaced by the soft :math:`\sigma`-rated
+  reversal closure described above.
 * **Post-exit residuals are** :math:`\sigma` **'s alone** (+133 at :math:`\sigma = 1`, +8.5 at 16, −253 recovering
   at 0.25, dyn/cm²): once the flame is gone there is no chemistry at the boundary for :math:`\beta_s` to model, and
   the emptied domain returns to ambient at the relaxation rate.

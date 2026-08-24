@@ -77,9 +77,19 @@ is the point.
 
 ## Status
 
-Built and smoke-tested (ignition, kernel growth, and the initial dilatation
-pulse verified at the shipped scale); the full two-variant production
-comparison and its table belong to whoever runs Phase 4 in earnest — this
-case exists so that Lesson 9 is runnable, not so that its numbers are
-pre-chewed. Not registered in `Tests/CMakeLists.txt`: at ~1 CPU-hour per
-variant it is an application capstone, not a CI gate.
+Built, smoke-tested, and already earning its keep: the first production vent
+run crashed at t = 4.08 ms, and the forensics (NaN localised to the vent
+plane, backflow of −144 → −2628 cm/s over the preceding 45 steps) exposed a
+real kernel defect — the outflow-reversal branch answered transient backflow
+by *pinning* the ghost pressure to ambient, and the pressure discontinuity
+that pin creates under a hard reversal fed NaNs. This is exactly the state a
+chamber ring-down produces (the vent breathes) and none of the smaller cases
+sustains. The closure is now a soft σ-rated relaxation, continuous through
+u = 0; with it the vent variant completes the full 8 ms with the ring-down
+resolved (buildup peak ≈ +1300 dyn/cm² at 0.9 ms, V̇_vent settling to
+≈ 71 cm²/s). Every previously-completing table row in the suite reproduces
+to the digit under the new closure — see the FlameOutflow READMEs. The full
+two-variant production comparison and its table still belong to whoever runs
+Phase 4 in earnest; regenerate BOTH variants with a post-fix executable so
+the A/B compares like with like. Not registered in `Tests/CMakeLists.txt`:
+at ~1 CPU-hour per variant it is an application capstone, not a CI gate.

@@ -274,6 +274,13 @@ finite_or(const amrex::Real x, const amrex::Real fallback) noexcept
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
+one_m_M2_rev(const amrex::Real mach) noexcept
+{
+  return amrex::max<amrex::Real>(
+    1.0 - mach * mach, constants::very_small_num());
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
 minmod(const amrex::Real a, const amrex::Real b) noexcept
 {
   if (a * b <= 0.0) {
@@ -595,12 +602,29 @@ apply(
   // ---- 3. Direction sanity ----------------------------------------------
   const bool outflow_face = (tgt.type == Type::outflow);
   if (outflow_face && (u_out_N < 0.0)) {
-    // Transient reversal at an outflow: fall back to an ambient-pressure
-    // closure keeping interior composition and tangential velocity, so a
-    // grazing flow is not arrested.
+    // Transient reversal at an outflow: keep the interior state and RELAX the
+    // ghost pressure toward the target at the boundary's own rate -- the same
+    // increment form as the outflow branch, so the closure is continuous
+    // through u_out = 0 and sigma controls reversal stiffness like everything
+    // else.  A hard pin of tgt.p here (the original closure) is a step
+    // discontinuity of the full overpressure at every reversal, and a
+    // ringing chamber that breathes through its vent turns that into a
+    // runaway: backflow -144 -> -2628 cm/s in 45 steps, a 138 K cell, NaN
+    // (found by NSCBC-Chamber; the plenum variant, whose boundary sits in
+    // quiet duct, was untouched).
     bump(Diag::reversed);
+    const amrex::Real K_rev = prm.sigma * one_m_M2_rev(mach) * c_N / prm.L_ref;
+    amrex::Real p_g_rev =
+      qN.p - static_cast<amrex::Real>(layer) * dx_normal * K_rev *
+               (qN.p - tgt.p) / (2.0 * (c_N - u_out_N));
+    const amrex::Real p_floor_rev = amrex::max<amrex::Real>(
+      1.0e-3 * (tgt.p > 0.0 ? tgt.p : qN.p), constants::very_small_num());
+    if (!amrex::Math::isfinite(p_g_rev) || (p_g_rev < p_floor_rev)) {
+      p_g_rev = p_floor_rev;
+      bump(Diag::floored);
+    }
     amrex::Real T_g = qN.T, e_g = 0.0;
-    eos.RYP2T(qN.rho, qN.Y, tgt.p, T_g);
+    eos.RYP2T(qN.rho, qN.Y, p_g_rev, T_g);
     eos.RTY2E(qN.rho, T_g, qN.Y, e_g);
     if (
       !amrex::Math::isfinite(T_g) || !(T_g > 0.0) ||

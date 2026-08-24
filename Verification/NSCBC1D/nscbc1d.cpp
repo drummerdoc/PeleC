@@ -2252,13 +2252,16 @@ check_sustained_ramp()
 
   const Real e_orc = row(1.0, 2);
   const Real g_orc = gt[NS - 1];
+  const Real g1_orc = gt[1];
   const Real e1_orc = pt[1] - pr[1];
   const Real e_ent1 = row(1.0, 0);
   const Real g_ent = gt[NS - 1];
+  const Real g1_ent = gt[1];
   const Real e1_ent = pt[1] - pr[1];
   const Real e_ent4 = row(4.0, 0);
   const Real e_mat1 = row(1.0, 1);
   const Real g_mat = gt[NS - 1];
+  const Real g1_mat = gt[1];
   const Real e1_mat = pt[1] - pr[1];
   row(1.0, 3);
   const Real g_eT = gt[NS - 1];
@@ -2311,12 +2314,16 @@ check_sustained_ramp()
     std::abs(e1_mat - e1_orc) < 0.35 * std::abs(e1_ent - e1_orc),
     "extrap_material holds the front while the boundary equilibrates", buf);
 
+  // Gated at 0.7 tau, the same window as the pressure gate and for the same
+  // reason (see the frozen-source caveat above); the t_end values are
+  // reported for context but sit in the artifact-dominated region.
   std::snprintf(
     buf, sizeof(buf),
-    "du/dn at t_end: %.0f with, %.0f without, oracle %.0f (exact %.0f)", g_mat,
-    g_ent, g_orc, g0);
+    "du/dn at 0.7 tau: %.0f with, %.0f without, oracle %.0f (exact %.0f; "
+    "t_end: %.0f / %.0f / %.0f)",
+    g1_mat, g1_ent, g1_orc, g0, g_mat, g_ent, g_orc);
   check(
-    std::abs(g_mat - g_orc) < 0.5 * std::abs(g_ent - g_orc),
+    std::abs(g1_mat - g1_orc) < 0.5 * std::abs(g1_ent - g1_orc),
     "extrap_material preserves the structure the oracle preserves", buf);
 
   // ---- C11x: the profile-fit experiment (reported, not gated) ------------

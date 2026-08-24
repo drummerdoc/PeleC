@@ -74,13 +74,17 @@ the inverted sign and are superseded below):
 | outflow | σ | β | β_s | H₂ | CH₄ | ratio |
 |---|---|---|---|---|---|---|
 | hard `p = p_amb` | — | — | — | −507 | −776 | 1.53 |
-| characteristic | 1 | 1 | 1 | +1667 | +2831 | **1.70** |
-| characteristic | 1 | 0.5 | 1 | +1375 | +2253 | **1.64** |
+| characteristic | 1 | 1 | 1 | +1714 | +2932 | **1.71** |
+| characteristic | 1 | 0.5 | 1 | +1359 | +2136 | **1.57** |
 
-**1.65 measured against 1.82 predicted**, with no fitted quantity — the
-prediction is from the flame's expansion ratio and thickness alone. The
-CH₄ σ = 1, β = 0.5, β_s = 1 row has since been re-measured on a different
-machine, toolchain and build system: +2253.3, the same number to the digit.
+**1.64 measured against 1.82 predicted**, with no fitted quantity — the
+prediction is from the flame's expansion ratio and thickness alone. These
+β_s = 1 rows are failure-mode configurations whose piled-up structure
+transiently reverses the boundary, so they shifted a few percent when the
+hard reversal pin became the soft σ-rated closure; the pre-fix CH₄
+β = 0.5 value (+2253) had been reproduced to the digit (+2253.3) across a
+different machine, toolchain and build system, so the shift is the closure,
+not the environment.
 
 ## What it says about β_s, more strongly than the H₂ case did
 
@@ -93,12 +97,12 @@ reference:
 
 | configuration | CH₄ |
 |---|---|
-| β_s = 1 (source off) | +2253 |
-| β_s = 0 (source on) | **+873** |
+| β_s = 1 (source off) | +2136 |
+| β_s = 0 (source on) | **+766** |
 | β_s = 0 + `extrap_temperature` | **−547** |
 | hard `p = p_amb` | −776 |
 
-Turning the corrected source on cuts the error 2.6× (the H₂ case measures
+Turning the corrected source on cuts the error 2.8× (the H₂ case measures
 2.0×), and the closure pair — the ghosts carrying the diffusive dp/dt, the
 incoming wave carrying the chemical one — lands at the hard-outflow level,
 exactly as in the parent case. The stronger the heat release, the more the

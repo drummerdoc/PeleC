@@ -36,10 +36,13 @@ def dump(plt, var, scratch):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    argv = sys.argv[1:]
     xvent = 1.2
-    if "--xvent" in sys.argv:
-        xvent = float(sys.argv[sys.argv.index("--xvent") + 1])
+    if "--xvent" in argv:
+        i = argv.index("--xvent")
+        xvent = float(argv[i + 1])
+        del argv[i:i + 2]
+    args = [a for a in argv if not a.startswith("--")]
     with tempfile.TemporaryDirectory() as scratch:
         for d in args:
             plts = sorted(p for p in os.listdir(d)
