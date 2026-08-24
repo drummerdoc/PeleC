@@ -752,20 +752,22 @@ PeleC::nscbc_report_diagnostics()
                    << ",  source dropped "
                    << h[pc_nscbc::Diag::source_drop] << "\n";
     if (structure > 0) {
-      // Advisory, not a fallback: this is the configuration the flame-exit
-      // test showed the sigma = 0.25 default does not survive.
+      // Advisory, not a fallback: a front is in the outflow boundary cells,
+      // which is the configuration the flame closures exist for.
       amrex::Print()
         << "  NSCBC: material structure (|dS| > 5% of rho per cell) sat in "
         << structure
         << " outflow boundary-cell fills since the last report.\n"
-        << "         If a front is CROSSING this outflow, sigma of O(10) is "
-           "what survives it; the sigma = 0.25 default can push the front "
-           "back\n"
-        << "         and abort the run, and bc_nscbc_extrap_material should "
-           "be off during a transit.  See the BCs chapter and "
+        << "         A flame or front is on this outflow: set "
+           "bc_nscbc_extrap_temperature = 1 and bc_nscbc_beta_s = 0 (any "
+           "sigma then\n"
+        << "         survives a crossing), and keep bc_nscbc_extrap_material "
+           "off during a transit.  See the BCs chapter and "
            "NSCBC-FlameOutflow/README.md.\n";
     }
   }
+  // Settle any counter atomics still in flight on other streams before the
+  // reset; the blocking Gpu::copy above synchronised only its own stream.
   amrex::Gpu::Device::streamSynchronize();
   nscbc_diag().assign(pc_nscbc::Diag::count, 0);
 }
