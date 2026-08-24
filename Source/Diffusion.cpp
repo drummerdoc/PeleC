@@ -144,11 +144,22 @@ PeleC::getMOLSrcTerm(
           });
       }
       // Phase-2 NSCBC hook point for the diffusive (viscous) LODI terms; see
-      // the corresponding note in Hydro.cpp.  Note that the viscous operator
-      // below consumes the *entire* ghost region including transverse corner
-      // ghosts (pc_diffusion_flux forms transverse gradients from a four-point
-      // average straddling j+-1/k+-1), so any boundary treatment must produce
-      // sensible values in all numGrow() layers, not just the first.
+      // the corresponding note in Hydro.cpp.  Two facts about how this
+      // operator meets the domain boundary matter for any boundary treatment:
+      //
+      //  * Ghost values are consumed at their CELL CENTRES over a full dx --
+      //    pc_diffusion_flux forms every normal gradient as
+      //    (q(iv) - q(ivm)) / dx with no boundary special-casing, so the
+      //    boundary-face heat flux is lambda (T_int - T_ghost)/dx.  The
+      //    value-on-the-face convention (dT = 2 (T_int - T_wall)/dx, as in
+      //    the MLMG-based Pele codes) exists in PeleC only in the opt-in
+      //    pc_isothermal_wall_fluxes path.
+      //
+      //  * The whole numGrow() ghost region is consumed, not just the first
+      //    layer: this source feeds sources_for_hydro on cbox =
+      //    grow(vbox, ng-1), so fluxes are formed at faces up to ng-1 cells
+      //    OUTSIDE the domain, and the transverse gradients' four-point
+      //    averages (straddling j+-1/k+-1) read the corner ghosts besides.
 
       // Compute transport coefficients, coincident with Q
       auto const& coe_cc = coeff_cc.array();
