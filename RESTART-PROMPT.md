@@ -42,6 +42,16 @@ full reasoning — the commit messages are the lab notebook.
   `Verification/NSCBC1D/README.md`.
 * Driver: air 53/53, LiDryer 57/57, PELE_NUM_ADV=2 57/57, SRK 40/40 (statics; dynamics
   skipped by design). CI job `NSCBC-Driver` runs all four; GNUmake takes `PELE_EOS=SRK`.
+* Static GPU audit of the branch code is clean (commit e6a8ad9): device paths, captures,
+  counters, and every synchronize reviewed. The actual device build remains item 5.
+
+## Local artifacts (this machine, not in git)
+
+* `Exec/RegTests/NSCBC-{FlameOutflow,COVO}/runs/` hold the animation runs and MP4s
+  (flame exit 3-way, vortex, pulse) — git-ignored, reproducible from the inputs.
+* The teaching page "Waves at the Open Boundary" (σ/β tutorial with live figures) is a
+  claude.ai artifact: https://claude.ai/code/artifact/4d4f11af-7932-4c80-95f7-cf9bd90b984a
+* Untracked `PAPERS/` at the repo root is Marc's reference library — expected, leave it.
 
 ## Work queue
 
@@ -51,8 +61,12 @@ full reasoning — the commit messages are the lab notebook.
 2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
    wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
 3. **T7 mini-SydGex** — BUILT as `Exec/RegTests/NSCBC-Chamber` (Lesson 9 is runnable);
-   the two-variant production comparison and its table remain to be run and written up.
-   Follow-ups: laterally-expanding plenum and the baffle (both need EB).
+   Marc is running the two-variant production comparison on a bigger machine (launched
+   2026-08-24). When those plotfiles come back: process with `chamber_metrics.py`
+   (`--xvent 1.2`), build the peak-aligned trace difference / V̇ balance / ring-down
+   table into the case README's Status section, and consider the σ = 16 ring-down
+   variant the README names. Follow-ups: laterally-expanding plenum and the baffle
+   (both need EB).
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and
@@ -61,5 +75,6 @@ full reasoning — the commit messages are the lab notebook.
 5. Hardware-gated: CUDA/HIP compile, CPU-vs-GPU on NSCBC-Acoustic, register-spill profile.
 6. Upstream: curate the branch into an AMReX-Combustion PR when ready.
 
-Start by confirming `git status` is clean and the driver runs green, then pick up the queue
-at item 1 unless I say otherwise.
+Start by confirming `git status` is clean (untracked `PAPERS/` is expected) and the driver
+runs green, then pick up the queue at item 1 — or at item 3's write-up if the Lesson-9
+production plotfiles have arrived — unless I say otherwise.
