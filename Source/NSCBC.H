@@ -234,6 +234,20 @@ struct Target
   amrex::Real u[3] = {0.0, 0.0, 0.0}; // inflow: target velocity [cm/s]
   amrex::Real T = 0.0;                // inflow: target temperature [K]
   amrex::Real Y[NUM_SPECIES] = {0.0}; // inflow: target mass fractions
+
+  // Inflow acoustic-injection feed-forward: the time derivative of the
+  // NORMAL velocity target, supplied analytically by the problem hook when
+  // it is forcing the inlet.  The value-relaxation alone has no amplitude
+  // slot (design doc I.3e) -- an injected signal rides the same relaxation
+  // that holds the mean, with the measured deterioration of driver t3 --
+  // and a register-based NRI transplant does not create one (measured:
+  // subtracting the outgoing wave from the deviation only exposes the bare
+  // injection bandwidth limit).  This term is that slot, stateless: the
+  // incoming amplitude gains 2 rho c du^t/dt, the GC transplant of the
+  // flux form's acoustic forcing, and the relaxation keeps its one job of
+  // holding the mean.  Zero (default) recovers the classical inlet
+  // identically.
+  amrex::Real dudt = 0.0; // d(u_normal target)/dt, LAB frame [cm/s^2]
 };
 
 // ---------------------------------------------------------------------------
@@ -807,6 +821,14 @@ apply(
       const amrex::Real u_out_tgt = n_sgn * tgt.u[idir];
       const amrex::Real K = prm.relax_u * one_m_M2 * c_N / prm.L_ref;
       L_in = -K * qN.rho * c_N * (u_out_N - u_out_tgt);
+      // Acoustic-injection feed-forward (Target::dudt): the incoming wave
+      // carries the target's rate directly, so a forced signal does not
+      // have to fight its way through the relaxation.  n_sgn converts the
+      // lab-frame rate to the outward frame; the sign follows the
+      // relaxation term's convention (positive L_in raises u_out through
+      // the Rm inversion), and the factor 2 is u = (R+ + R-)/2: imposing a
+      // velocity rate through the incoming invariant alone needs twice it.
+      L_in += 2.0 * rho_c * (n_sgn * tgt.dudt);
     }
     L_in -= (1.0 - beta) * T_in;
     if (prm.beta_s < 1.0) {

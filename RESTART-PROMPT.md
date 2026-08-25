@@ -147,11 +147,18 @@ unchanged to the digit; chamber table regenerated (README).
    late); the baffle run settles by 8 ms. Building all this also found the
    outflow's equilibration micro-inflow (−0.28 cm/s — real, benignly counted) and
    put a 1e-9 c roundoff deadband on the reversal counter.
-4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
-   checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
-   WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and
-   reflection removal where sigma=16 is still chosen. The C11x closure may want the trend
-   register as its transit/decay gate.
+4. **Boundary registers** — DESIGN NOTE DONE with a measured prototype
+   (2026-08-25): `Docs/NSCBC-boundary-registers-design.md`. Headlines: a register-only
+   NRI transplant FAILS in the GC form (no amplitude slot to protect — I.3e, measured);
+   the slot is `Target::dudt`, stateless and ALREADY IN THE KERNEL (usable by any
+   problem hook today; zero = classical inlet identically); the register's true job is
+   the learned reference mean (EMA of R₋, τ = 3 t_a). Register + dudt measured in the
+   driver-held-register prototype: I_in = 0.89–1.08 over the full 3-stiffness ×
+   3-frequency matrix including ON resonance, vs 0.07–4.7 classical — Daviller's I ≡ 1,
+   transplanted. REMAINING (the note's phases): A — PeleC register infrastructure
+   (face-band MF, once-per-advance EMA update, BCfill target composition, checkpoint +
+   restart-bit-identity gate, gate the driver t3 rows); B — NDNR outlets (ema_pplus,
+   kill the 28% at σ=16-class anchoring); C — trend gates for C11x/C14.
 5. Hardware-gated: CUDA/HIP compile, CPU-vs-GPU on NSCBC-Acoustic, register-spill profile.
 6. Upstream: curate the branch into an AMReX-Combustion PR when ready.
 

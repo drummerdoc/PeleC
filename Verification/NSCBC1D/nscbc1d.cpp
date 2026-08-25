@@ -3080,8 +3080,23 @@ struct DuctForcedResult
 // Settles for n_settle acoustic round trips (forcing on throughout), then
 // projects n_per integer periods.  The Fourier projection at f ignores DC,
 // so the mean-flow offset never needs subtracting.
+//
+// nri = true prototypes the BOUNDARY-REGISTER architecture (design doc II.2,
+// queue item 4) without touching the kernel: the driver -- standing in for
+// the once-per-advance register update PeleC would own -- keeps an EMA of
+// the outgoing invariant R- = u - p/(rho c) at the boundary cell
+// (tau = 3 t_a, the NDNR prescription), splits the instantaneous outgoing
+// wave off it, u_minus = (R- - EMA)/2, and hands the kernel a target
+// u^t + u_minus.  The relaxation then fights only the incoming content and
+// the mean drift; the wave the duct sends back is granted passage instead
+// of being mistaken for error.  The kernel remains a pure function of
+// (state, Target): all the state lives in the caller, which is the entire
+// architectural claim being measured.
+// mode: 0 = classical, 1 = driver-held NRI register, 2 = stateless
+// feed-forward (Target::dudt), 3 = both.
 DuctForcedResult
-duct_forced(Real relax_u, Real freq, int n, int n_settle, int n_per)
+duct_forced(
+  Real relax_u, Real freq, int n, int n_settle, int n_per, int mode = 0)
 {
   Case cs;
   cs.n = n;
@@ -3132,6 +3147,12 @@ duct_forced(Real relax_u, Real freq, int n, int n_settle, int n_per)
   std::vector<Real> psum(cs.n, 0.0), p2sum(cs.n, 0.0);
   Real us = 0.0, uc = 0.0, rs = 0.0, rc = 0.0, wsum = 0.0;
 
+  // The register: an EMA of the outgoing invariant at the boundary cell.
+  // Seeded with the quiescent value; tau = 3 t_a per the NDNR prescription.
+  const Real rhoc0 = rho0 * c0;
+  Real ema_Rm = u0 - cs.p0 / rhoc0;
+  const Real tau_ema = 3.0 * (2.0 * cs.L / c0);
+
   Real t = 0.0;
   while (t < t_end) {
     Real cmax = 0.0;
@@ -3144,14 +3165,28 @@ duct_forced(Real relax_u, Real freq, int n, int n_settle, int n_per)
     if (dt <= 0.0) {
       break;
     }
+    // The register update: ONCE per step, outside the stages, from the
+    // completed state -- exactly the cadence PeleC's once-per-advance
+    // update would have.  The stages below read it frozen.
+    Real u_minus = 0.0;
+    if ((mode == 1) || (mode == 3)) {
+      const Prim qb = get_prim(f.at(0));
+      const Real Rm = qb.u - qb.p / rhoc0;
+      const Real w = dt / (tau_ema + dt);
+      ema_Rm += w * (Rm - ema_Rm);
+      u_minus = 0.5 * (Rm - ema_Rm);
+    }
     // The RK2 stages see the target at their own stage times.  The hard-p
     // fill runs AFTER fill_bcs: the hi target is `off` there, whose
     // zero-gradient copy would otherwise overwrite the reflecting ghost.
-    in.u[0] = u0 + A * std::sin(om * t);
+    const bool ff = (mode == 2) || (mode == 3);
+    in.u[0] = u0 + A * std::sin(om * t) + u_minus;
+    in.dudt = ff ? A * om * std::cos(om * t) : 0.0;
     fill_bcs(f, in, off, prm, dx);
     hard_p_fill_hi(f, cs.p0);
     stage(f, g, dx, dt);
-    in.u[0] = u0 + A * std::sin(om * (t + dt));
+    in.u[0] = u0 + A * std::sin(om * (t + dt)) + u_minus;
+    in.dudt = ff ? A * om * std::cos(om * (t + dt)) : 0.0;
     fill_bcs(g, in, off, prm, dx);
     hard_p_fill_hi(g, cs.p0);
     stage(g, h, dx, dt);
@@ -3383,6 +3418,26 @@ run_t3_t5(bool profiles, int n, Real relax_cli)
     check(
       (Iu_row[1] < Iu_row[2]) && (Iu_row[2] < Iu_row[3]),
       "off-resonance injection stiffens with relax_u", buf);
+
+    // The queue-item-4 prototypes (reported, not gated -- gates belong to
+    // real implementations).  Mode 1: driver-held NRI register (Daviller's
+    // I = 1 claim).  Mode 2: the stateless feed-forward amplitude slot
+    // (Target::dudt).  Mode 3: both together.
+    for (int md = 1; md <= 3; md++) {
+      const char* names[] = {"", "NRI register", "dudt feed-forward",
+                             "register + feed-forward"};
+      std::printf("\n    same matrix, %s:\n", names[md]);
+      for (int m2 = 1; m2 < 4; m2++) {
+        for (int j = 0; j < 3; j++) {
+          const DuctForcedResult rn = duct_forced(kv[m2], fr[j], n, 6, 4, md);
+          std::snprintf(
+            buf, sizeof(buf),
+            "relax_u %.2f, f/f0 %.2f: I_in = %.3f  (I_u = %.3f)", kv[m2],
+            fr[j] / f0, rn.I_in, rn.I_u);
+          report(names[md], buf);
+        }
+      }
+    }
   } else {
     const Real k = relax_cli > 0.0 ? relax_cli : 2.0;
     std::printf(

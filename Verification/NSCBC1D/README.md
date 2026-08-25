@@ -289,6 +289,27 @@ resonance; that is the measured cost of statelessness at the inlet, and the
 NRI/register discussion (design doc II.2, queue item 4) is the literature's
 answer to exactly this table.
 
+**t3 also carries the queue-item-4 prototypes** (reported, not yet gated):
+the same matrix under three inlet models, with the register held by the
+*driver loop* — updated once per step outside the stages, read frozen —
+which is the boundary-registers architecture with the kernel untouched.
+I_in (Daviller's index, incoming amplitude over the ideal injector's):
+
+| inlet model | I_in over the 9-point matrix |
+|---|---|
+| classical | 0.07 – 4.7 |
+| NRI register alone | 0.22 – 0.95 |
+| `Target::dudt` feed-forward alone | 0.85 – 5.24 |
+| **register + feed-forward** | **0.89 – 1.08, incl. on resonance** |
+
+The register-only NRI transplant fails structurally (the value form has no
+amplitude slot to protect — I.3e measured); `dudt` is that slot, stateless
+and now in the kernel; the register's real job is the *learned reference
+mean* that lets the relaxation ignore the returning wave. Together they
+put I_in within ~10% of unity at every stiffness and frequency, and the
+residual velocity pattern is the duct's own `|1+e^{iθ}|/2` to three
+digits. Full design: `Docs/NSCBC-boundary-registers-design.md`.
+
 **t5 — standing-wave pattern (Daviller §7).** Same runs; P_RMS(x) at 17
 stations against the analytic envelope |sin(k_eff(L−x))|. Shape correlation
 is 1.000 at all three frequencies (gated off-resonance at > 0.95): nodes
