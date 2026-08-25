@@ -143,6 +143,11 @@ closed end included, is interior EB — nothing touches a domain face, which
 is the documented EB-at-domain-boundary NaN limitation — and
 `pelec.eb_zero_body_state = 1` is mandatory as in every EB+NSCBC
 configuration. Boundary settings are the flame-crossing recipe, unchanged.
+Both variants run `pelec.do_mol = 1`: the Godunov path inherited from the
+duct inputs NaN'd at t = 1.4 ms in the fluid hugging a unioned-slab cut-cell
+corner — MOL is the EB-supported hydro, as every EB RegTest in the tree
+attests. That makes the box-vs-duct-plenum comparison differ in scheme as
+well as geometry; the box-vs-baffle A/B is internally consistent.
 
 Building these taught two counter lessons on day one. The reversal counter
 read 314k in the first 100 steps, before the ignition wave was within a

@@ -43,7 +43,7 @@ prob.pmf_flame_loc = 3.0
 prob.pmf_datafile  = "LiDryer_H2_p1_phi0_4000tu0300.dat"
 
 pelec.do_hydro = 1
-pelec.do_mol = 0
+pelec.do_mol = 1
 pelec.diffuse_vel  = 1
 pelec.diffuse_temp = 1
 pelec.diffuse_spec = 1
