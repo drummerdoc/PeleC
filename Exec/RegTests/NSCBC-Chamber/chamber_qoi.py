@@ -47,9 +47,16 @@ def dump(plt, var, scratch):
     return a, float(dx), float(dy), float(t), float(xlo)
 
 
-def extract(rundir, xvent, scratch):
+def extract(rundir, xvent, scratch, xlo_ch=None, ymask=None):
     """One row per plotfile: t, dp_closed, dp_mean, burnt_frac, Vdot_vent,
-    sigma_exp.  Cached beside (not inside) the run directory."""
+    sigma_exp.  Cached beside (not inside) the run directory.
+
+    For the EB box variants pass --xlo (the chamber's back wall) and
+    --ymask ylo,yhi (the chamber's interior rows): the chamber region is
+    then the interior cavity rather than "everything left of the vent",
+    which in the box would sweep in plenum rows and zeroed EB wall cells.
+    Cells with rho below 1e-8 (zeroed body state) are excluded everywhere.
+    """
     cache = rundir.rstrip("/") + "-traces.csv"
     plts = sorted(p for p in os.listdir(rundir)
                   if re.fullmatch(r"plt\d+", p)
@@ -67,20 +74,36 @@ def extract(rundir, xvent, scratch):
         rho, *_ = dump(f, "density", scratch)
         rH2, *_ = dump(f, "rho_H2", scratch)
         u, *_ = dump(f, "x_velocity", scratch)
-        nx_ch = int(round((xvent - xlo) / dx))       # chamber columns
-        iv = min(nx_ch, pr.shape[1]) - 1             # vent-plane column
-        y_h2 = rH2 / rho
-        y_fresh = y_h2[:, :nx_ch].max()
-        c = 1.0 - y_h2[:, :nx_ch] / max(y_fresh, 1e-30)
-        burnt, fresh = c > 0.9, c < 0.1
-        rho_ch = rho[:, :nx_ch]
-        sigma_exp = (rho_ch[fresh].mean() / rho_ch[burnt].mean()
+        i0 = 0 if xlo_ch is None else int(round((xlo_ch - xlo) / dx))
+        nx_ch = int(round((xvent - xlo) / dx))       # vent-plane column
+        iv = min(nx_ch, pr.shape[1]) - 1
+        ny = pr.shape[0]
+        j0, j1 = 0, ny
+        if ymask is not None:
+            j0 = int(round(ymask[0] / dy))
+            j1 = int(round(ymask[1] / dy))
+        live = rho > 1.0e-8                          # excludes zeroed EB body
+        ch = np.zeros_like(live)
+        ch[j0:j1, i0:nx_ch] = True
+        ch &= live
+        with np.errstate(invalid="ignore", divide="ignore"):
+            y_h2 = np.where(live, rH2 / np.maximum(rho, 1e-30), 0.0)
+        y_fresh = y_h2[ch].max()
+        c = np.where(ch, 1.0 - y_h2 / max(y_fresh, 1e-30), 0.0)
+        burnt, fresh = ch & (c > 0.9), ch & (c < 0.1)
+        sigma_exp = (rho[fresh].mean() / rho[burnt].mean()
                      if burnt.any() and fresh.any() else np.nan)
+        closed = np.zeros_like(live)
+        closed[j0:j1, i0:i0 + (nx_ch - i0) // 10 + 1] = True
+        closed &= live
+        vent = live[:, iv] if ymask is None else (live[:, iv] &
+                                                  (np.arange(ny) >= j0) &
+                                                  (np.arange(ny) < j1))
         rows.append([t,
-                     pr[:, :nx_ch // 10 + 1].mean() - PAMB,
-                     pr[:, :nx_ch].mean() - PAMB,
-                     c.mean(),
-                     u[:, iv].sum() * dy,
+                     pr[closed].mean() - PAMB,
+                     pr[ch].mean() - PAMB,
+                     c[ch].mean() if ch.any() else np.nan,
+                     u[vent, iv].sum() * dy,
                      sigma_exp])
         if n % 40 == 0:
             print(f"#   {rundir}: {n}/{len(plts)}", file=sys.stderr)
@@ -155,22 +178,31 @@ def ringdown(tr, t_from):
 
 def main():
     argv = sys.argv[1:]
-    xvent, s16dir = 1.2, None
+    xvent, s16dir, xlo_ch, ymask = 1.2, None, None, None
     if "--xvent" in argv:
         i = argv.index("--xvent")
         xvent = float(argv[i + 1])
+        del argv[i:i + 2]
+    if "--xlo" in argv:
+        i = argv.index("--xlo")
+        xlo_ch = float(argv[i + 1])
+        del argv[i:i + 2]
+    if "--ymask" in argv:
+        i = argv.index("--ymask")
+        ymask = tuple(float(v) for v in argv[i + 1].split(","))
         del argv[i:i + 2]
     if "--sigma16" in argv:
         i = argv.index("--sigma16")
         s16dir = argv[i + 1]
         del argv[i:i + 2]
     vent_dir, plenum_dir = argv[0], argv[1]
-    area = xvent * 0.3        # chamber cross-section per unit depth [cm^2]
+    x0 = 0.0 if xlo_ch is None else xlo_ch
+    area = (xvent - x0) * 0.3  # chamber cross-section per unit depth [cm^2]
 
     with tempfile.TemporaryDirectory() as scratch:
-        tv = extract(vent_dir, xvent, scratch)
-        tp_ = extract(plenum_dir, xvent, scratch)
-        ts = extract(s16dir, xvent, scratch) if s16dir else None
+        tv = extract(vent_dir, xvent, scratch, xlo_ch, ymask)
+        tp_ = extract(plenum_dir, xvent, scratch, xlo_ch, ymask)
+        ts = extract(s16dir, xvent, scratch, xlo_ch, ymask) if s16dir else None
 
     rows = {}
     for name, tr in [("vent", tv), ("plenum", tp_)] + (

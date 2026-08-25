@@ -177,9 +177,59 @@ the covered cells hold zeroed states, so derived velocities in plotfile
 dumps read NaN *inside the walls* — an artifact of the flag, not of the
 solve.
 
-Cost at dx = 0.0125: 192 × 72 = 13,824 cells, ~120k steps to 8 ms — about
-6× the vent variant. Metrics: `chamber_qoi.py` with `--xvent 1.4` measures
-the chamber interior; note its chamber-mean columns integrate the full
-domain height and so include EB wall cells (zeroed states) — the
-closed-end/vent traces are y-localised enough to read directly, and a
-masked variant is the obvious upgrade if the box A/B becomes a table here.
+Cost at dx = 0.0125: 192 × 72 = 13,824 cells, ~168k steps to 8 ms, 2.65 h
+at 6 ranks. Metrics: `chamber_qoi.py --xvent 1.405 --xlo 0.205
+--ymask 0.305,0.605` — the mask restricts every chamber reduction to the
+cavity interior and drops zeroed EB body cells, which the box needs and the
+duct variants don't.
+
+**The lateral-expansion answer (first production set, 2026-08-25).** The
+box against the straight-duct plenum, phase by phase (closed-end
+overpressure in dyn/cm², vent flux in cm²/s; the ignition IC is clipped to
+the chamber interior — an unclipped kernel pokes through the 0.05-thick
+closed end and lights the plenum behind the chamber, which is how the
+first attempt failed):
+
+| | box (lateral plenum) | duct plenum |
+|---|---|---|
+| dp_closed at 0.6 ms | **1,239** | 4,251 |
+| buildup character | ~900–1,400, flat | 1,600–4,300, humped |
+| V̇_vent plateau | 46–53 | 67–73 |
+| chamber burnout (bf → 0.99) | ~6 ms | ~4.3 ms |
+| dp_closed at 8 ms | 3,705, rising | 2,679, past its 3,437 peak |
+
+The lateral expansion is a ~3× better vent: the chamber sees a third of
+the duct-plenum's overpressure throughout its burn, because the vented gas
+escapes sideways instead of having to push a chamber-length column of duct
+gas. The price is a slower burn — the weaker chamber–plenum pressure
+difference drives ~30% less vent flow and the chamber takes ~40% longer to
+empty. At late times both variants climb as the *extension* charge burns
+(the whole domain carries the premixed charge, by the duct convention), so
+neither shows a clean ring-down inside 8 ms and that QoI is honestly n/a
+here. The remaining caveat from the build sequence stands: box-vs-duct
+differs in hydro scheme (MOL vs Godunov) as well as geometry.
+
+**The baffle answer (same production set).** Baffle against box, everything
+identical but the plates (dp_closed in dyn/cm², V̇ in cm²/s):
+
+| | box | baffle |
+|---|---|---|
+| buildup to 2 ms | ~900–1,400 | ~900–2,400, climbing |
+| gap jet (2.5 ms) | V̇ = 47, bf = 0.46 | **V̇ = 281, bf = 0.71** |
+| downstream burnout | bf = 0.63 at 3.5 ms | **bf = 0.95 at 3.5 ms** |
+| peak dp_closed | 3,733 (the 8 ms plenum-burn tail) | **31,725 at 3.7 ms** |
+| vent backflow | V̇ min −0.0 | **V̇ min −67** |
+| reversal fills (whole run) | 1.5M | **14.1M** |
+| state at 8 ms | 3,705, still climbing | settled to ~200–700 |
+
+The Sydney phenomenology in miniature, all of it: the flame squeezes
+through the 0.1 gap and accelerates 6× (V̇ 47 → 281), torches the
+downstream half of the chamber in under a millisecond, and drives the
+closed-end overpressure to 8.5× the unbaffled maximum — the
+baffle-enhanced explosion peak this geometry exists to produce. The jet's
+violence puts the vent plane into genuine sustained breathing (V̇ to −67;
+14.1M reversal fills against the box's 1.5M — ten times the reversal duty,
+all through the unified closure without incident), and because the jet
+also consumes the plenum charge early, the baffle run is the only
+configuration in the whole suite that reaches a settled state by 8 ms.
+Both runs: zero NaN, ~168–174k steps, 2.7/3.4 h at 6 ranks.

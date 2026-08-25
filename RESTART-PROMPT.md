@@ -134,14 +134,19 @@ unchanged to the digit; chamber table regenerated (README).
    any scheme/alignment. Diagnosed by a 500-step A/B (identical cooling with
    bc_nscbc off and either body state; 298.0 K exactly with adiabatic walls). Both
    inps now set `pelec.eb_isothermal = 0`, matching the adiabatic domain walls.
-   Production relaunched post-fix (2026-08-25, box first, ONE AT A TIME at ≤ 6
-   ranks — the machine browned out under overlapped runs; baffle follows box).
-   When both land: box-vs-duct-plenum and baffle-vs-box A/B tables into the case
-   README via `chamber_qoi.py --xvent 1.405` (vent lip at 1.405 after the off-grid
-   shift; full-height chamber-mean columns include EB wall cells — caveat in the
-   README). Building all this also found the outflow's equilibration micro-inflow
-   (−0.28 cm/s across the face — real, benignly counted) and put a 1e-9 c roundoff
-   deadband on the reversal counter.
+   Production COMPLETE (2026-08-25): both variants ran the full 8 ms, zero NaN
+   (box 168k steps/2.7 h, baffle 174k/3.4 h at 6 ranks; ignition IC clipped to the
+   chamber interior after Marc caught the kernel poking through the closed-end
+   slab). A/B tables in the case README, measured with the cavity-masked
+   `chamber_qoi.py --xvent 1.405 --xlo 0.205 --ymask 0.305,0.605`. Headlines: the
+   lateral plenum is a ~3× better vent than the straight duct (chamber dp a third,
+   burn ~40% slower); the baffle produces the full Sydney phenomenology — 6× gap
+   jet, 8.5× overpressure peak (31.7k dyn/cm² at 3.7 ms), sustained vent breathing
+   (14.1M reversal fills vs the box's 1.5M, all through the unified closure).
+   Neither un-baffled variant rings down inside 8 ms (the extension charge burns
+   late); the baffle run settles by 8 ms. Building all this also found the
+   outflow's equilibration micro-inflow (−0.28 cm/s — real, benignly counted) and
+   put a 1e-9 c roundoff deadband on the reversal counter.
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and
