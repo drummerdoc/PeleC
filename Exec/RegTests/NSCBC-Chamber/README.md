@@ -143,11 +143,23 @@ closed end included, is interior EB — nothing touches a domain face, which
 is the documented EB-at-domain-boundary NaN limitation — and
 `pelec.eb_zero_body_state = 1` is mandatory as in every EB+NSCBC
 configuration. Boundary settings are the flame-crossing recipe, unchanged.
-Both variants run `pelec.do_mol = 1`: the Godunov path inherited from the
-duct inputs NaN'd at t = 1.4 ms in the fluid hugging a unioned-slab cut-cell
-corner — MOL is the EB-supported hydro, as every EB RegTest in the tree
-attests. That makes the box-vs-duct-plenum comparison differ in scheme as
-well as geometry; the box-vs-baffle A/B is internally consistent.
+Both variants run `pelec.do_mol = 1` (the EB-supported hydro, as every EB
+RegTest in the tree attests — the Godunov path died first), with the EB
+surfaces placed OFF the grid lines (x.4·dx via `prob.chamber_yc`; a surface
+on a cell face makes degenerate cut cells), and — the one that actually
+mattered — **`pelec.eb_isothermal = 0`**. PeleC's EB walls default to
+ISOTHERMAL AT `eb_boundary_T` = 1 KELVIN, and the first three production
+attempts all died of it: the quadratic EB gradient faithfully conducts heat
+into a 1 K wall, the cut cells refrigerate first (vfrac = 0.6 row at 268 K
+by 25 µs, marching to 77 K by 1.6 ms), the corner where two cold walls meet
+is coldest, and the arriving flame NaNs there — under either hydro scheme,
+at any grid alignment. A 500-step probe pinned it: min fluid T 268.1 K with
+default walls (identically with `bc_nscbc` off and either body state — not
+the boundary, not zero-state poisoning), 298.0 K exactly with adiabatic
+walls. Adiabatic EB matches the adiabatic domain walls, so the box is
+thermally consistent with the duct variants. The scheme caveat stands: the
+box-vs-duct-plenum comparison differs in hydro (MOL vs Godunov) as well as
+geometry; the box-vs-baffle A/B is internally consistent.
 
 Building these taught two counter lessons on day one. The reversal counter
 read 314k in the first 100 steps, before the ignition wave was within a

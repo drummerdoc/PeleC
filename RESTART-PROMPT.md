@@ -124,23 +124,22 @@ unchanged to the digit; chamber table regenerated (README).
    production attempts failed and were each diagnosed and fixed in commits: (i) the
    Godunov path NaN'd at an outer cut-cell corner at 1.4 ms → both inps run
    `pelec.do_mol = 1` (the EB-supported hydro; box-vs-duct A/B therefore differs in
-   scheme too); (ii) MOL then NaN'd a single cell at the re-entrant interior corner
-   (0.206, 0.306) at 1.25 ms → all EB surfaces were sitting EXACTLY on grid lines
-   (0.2 = 16 dx etc.), the degenerate-cut-cell configuration; the geometry is now
-   placed off-grid at x.4·dx via new `prob.chamber_yc` (x0 = 0.205, yc = 0.455,
-   kernel follows; dimensions still exactly 1.2 × 0.3). The off-grid + MOL
-   combination was smoked but its production had NOT yet cleared the ~1.25–1.4 ms
-   death zone when this note was written — that checkpoint is the first thing to
-   verify on resume (~30 min into a run). If it clears, run both variants to 8 ms
-   (ONE AT A TIME, ≤ 6–8 ranks — the machine browned out under overlapped runs),
-   then build the box-vs-duct-plenum and baffle-vs-box A/B tables into the case
-   README via `chamber_qoi.py --xvent 1.405` (vent lip moved with the off-grid
+   scheme too); (ii) grid-aligned EB surfaces → placed off-grid at x.4·dx via new
+   `prob.chamber_yc` (x0 = 0.205, yc = 0.455, kernel follows; dims still 1.2 × 0.3);
+   (iii) THE REAL KILLER: PeleC's EB walls default to ISOTHERMAL AT 1 KELVIN
+   (`eb_isothermal = true`, `eb_boundary_T = 1.0`) — the cut cells refrigerated
+   (268 K by 25 µs → 77 K by 1.6 ms), the flame NaN'd at the coldest corner, under
+   any scheme/alignment. Diagnosed by a 500-step A/B (identical cooling with
+   bc_nscbc off and either body state; 298.0 K exactly with adiabatic walls). Both
+   inps now set `pelec.eb_isothermal = 0`, matching the adiabatic domain walls.
+   Production relaunched post-fix (2026-08-25, box first, ONE AT A TIME at ≤ 6
+   ranks — the machine browned out under overlapped runs; baffle follows box).
+   When both land: box-vs-duct-plenum and baffle-vs-box A/B tables into the case
+   README via `chamber_qoi.py --xvent 1.405` (vent lip at 1.405 after the off-grid
    shift; full-height chamber-mean columns include EB wall cells — caveat in the
-   README). If the corner still NaNs off-grid, the next suspect is flame/EB-corner
-   diffusion; try `pelec.eb_srd_max_order` / redistribution options, or an isothermal
-   EB, before questioning the boundary. Building all this also found the outflow's
-   equilibration micro-inflow (−0.28 cm/s across the face — real, benignly counted)
-   and put a 1e-9 c roundoff deadband on the reversal counter.
+   README). Building all this also found the outflow's equilibration micro-inflow
+   (−0.28 cm/s across the face — real, benignly counted) and put a 1e-9 c roundoff
+   deadband on the reversal counter.
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and

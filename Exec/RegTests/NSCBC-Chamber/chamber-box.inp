@@ -29,6 +29,7 @@ pelec.bc_nscbc_extrap_material    = 0
 
 eb2.geom_type = "nscbc-chamber-box"
 pelec.eb_zero_body_state = 1
+pelec.eb_isothermal      = 0
 prob.chamber_x0  = 0.205
 prob.chamber_yc  = 0.455
 prob.chamber_len = 1.2
