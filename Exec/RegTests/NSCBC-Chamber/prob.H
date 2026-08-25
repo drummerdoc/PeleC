@@ -14,6 +14,7 @@
 #include "ProblemSpecificFunctions.H"
 #include "prob_parm.H"
 #include "Constants.H"
+#include "Geometry.H"
 
 AMREX_GPU_HOST_DEVICE
 AMREX_FORCE_INLINE
@@ -169,7 +170,7 @@ kernel_burnt_distance(
   amrex::GeometryData const& geomdata,
   ProbParmDevice const& prob_parm)
 {
-  const amrex::Real xc = geomdata.ProbLo()[0];
+  const amrex::Real xc = geomdata.ProbLo()[0] + prob_parm.kernel_x;
   const amrex::Real yc =
     geomdata.ProbLo()[1] + prob_parm.kernel_y * prob_parm.L[1];
   const amrex::Real r =
@@ -268,6 +269,26 @@ bcnormal(
     s_ext[UFS + n] = rho * massfrac[n];
   }
 }
+
+// ---------------------------------------------------------------------------
+//  The EB follow-ups (Lesson 9's deliberate omissions): the chamber as
+//  embedded walls INSIDE a laterally larger box, so the vent opens into a
+//  genuine plenum rather than a straight duct continuation; and, on top of
+//  that, the Sydney baffle -- two plates across the chamber leaving a
+//  central gap.  The whole chamber (closed end included) is interior EB:
+//  nothing touches a domain face, which is the documented
+//  EB-at-domain-boundary limitation.  Three slabs (bottom, top, back) plus
+//  optionally two baffle plates, as a union of boxes.  Requires
+//  pelec.eb_zero_body_state = 1 like every EB+NSCBC configuration.
+// ---------------------------------------------------------------------------
+class NSCBCChamberBox : public pele::pelec::Geometry::Register<NSCBCChamberBox>
+{
+public:
+  static std::string identifier() { return "nscbc-chamber-box"; }
+
+  void
+  build(const amrex::Geometry& geom, const int max_coarsening_level) override;
+};
 
 struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
 {

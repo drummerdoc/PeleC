@@ -1,5 +1,79 @@
 #include "prob.H"
 
+#include <AMReX_EB2_IF_Box.H>
+#include <AMReX_EB2_IF_Union.H>
+
+// The chamber as interior EB: three slabs (bottom, top, back) forming a
+// rectangular cavity open at its x-hi end, plus optionally the Sydney baffle
+// -- two plates across the cavity leaving a central gap.  All dimensions are
+// prob.* inputs so the two runnable variants (box, box+baffle) share one
+// geometry.  Everything is strictly inside the domain: an EB body cutting a
+// domain face is the documented NaN limitation.
+void
+NSCBCChamberBox::build(
+  const amrex::Geometry& geom, const int max_coarsening_level)
+{
+  amrex::ParmParse pp("prob");
+  amrex::Real x0 = 0.2;      // chamber interior back wall
+  amrex::Real len = 1.2;     // chamber interior length (vent at x0 + len)
+  amrex::Real h = 0.3;       // chamber interior height, centred in y
+  amrex::Real wall_t = 0.05; // slab thickness
+  int baffle = 0;
+  amrex::Real baffle_x = 0.8;   // plate upstream face, absolute
+  amrex::Real baffle_w = 0.05;  // plate thickness
+  amrex::Real baffle_gap = 0.1; // central opening height
+  pp.query("chamber_x0", x0);
+  pp.query("chamber_len", len);
+  pp.query("chamber_h", h);
+  pp.query("wall_t", wall_t);
+  pp.query("baffle", baffle);
+  pp.query("baffle_x", baffle_x);
+  pp.query("baffle_w", baffle_w);
+  pp.query("baffle_gap", baffle_gap);
+
+  const amrex::Real yc =
+    0.5 * (geom.ProbLo(1) + geom.ProbHi(1)); // chamber centreline
+  const amrex::Real ylo = yc - 0.5 * h, yhi = yc + 0.5 * h;
+
+  // bottom and top walls (extended back over the closed end's thickness),
+  // and the closed end itself
+  amrex::EB2::BoxIF bot(
+    {AMREX_D_DECL(x0 - wall_t, ylo - wall_t, 0.0)},
+    {AMREX_D_DECL(x0 + len, ylo, 1.0)}, false);
+  amrex::EB2::BoxIF top(
+    {AMREX_D_DECL(x0 - wall_t, yhi, 0.0)},
+    {AMREX_D_DECL(x0 + len, yhi + wall_t, 1.0)}, false);
+  amrex::EB2::BoxIF back(
+    {AMREX_D_DECL(x0 - wall_t, ylo, 0.0)},
+    {AMREX_D_DECL(x0, yhi, 1.0)}, false);
+  auto walls = amrex::EB2::makeUnion(bot, top, back);
+
+  if (baffle != 0) {
+    const amrex::Real gl = yc - 0.5 * baffle_gap, gh = yc + 0.5 * baffle_gap;
+    amrex::EB2::BoxIF plate_lo(
+      {AMREX_D_DECL(baffle_x, ylo, 0.0)},
+      {AMREX_D_DECL(baffle_x + baffle_w, gl, 1.0)}, false);
+    amrex::EB2::BoxIF plate_hi(
+      {AMREX_D_DECL(baffle_x, gh, 0.0)},
+      {AMREX_D_DECL(baffle_x + baffle_w, yhi, 1.0)}, false);
+    auto gshop = amrex::EB2::makeShop(
+      amrex::EB2::makeUnion(walls, plate_lo, plate_hi));
+    amrex::EB2::Build(
+      gshop, geom, max_coarsening_level, max_coarsening_level, 4, false);
+  } else {
+    auto gshop = amrex::EB2::makeShop(walls);
+    amrex::EB2::Build(
+      gshop, geom, max_coarsening_level, max_coarsening_level, 4, false);
+  }
+
+  amrex::Print() << "\n  NSCBC-Chamber BOX: interior [" << x0 << ", "
+                 << x0 + len << "] x [" << ylo << ", " << yhi
+                 << "], vent at x = " << x0 + len
+                 << (baffle != 0 ? ", baffle at x = " : "")
+                 << (baffle != 0 ? std::to_string(baffle_x) : std::string())
+                 << "\n";
+}
+
 std::string
 read_pmf_file(std::ifstream& in)
 {
@@ -131,6 +205,7 @@ amrex_probinit(
   amrex::ParmParse pp("prob");
   pp.query("pamb", PeleC::h_prob_parm_device->pamb);
   pp.query("kernel_r", PeleC::h_prob_parm_device->kernel_r);
+  pp.query("kernel_x", PeleC::h_prob_parm_device->kernel_x);
   pp.query("kernel_y", PeleC::h_prob_parm_device->kernel_y);
   pp.query("pmf_flame_loc", PeleC::h_prob_parm_device->pmf_flame_loc);
   pp.query("pmf_datafile", pmf_datafile);

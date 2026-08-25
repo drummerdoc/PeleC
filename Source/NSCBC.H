@@ -635,9 +635,20 @@ apply(
     // u_out = 0 that a flame finishing its transit turned into a growing
     // dither and a spurious 0.3 atm chamber spike
     // (Docs/NSCBC-reversal-branch-defect.md; gates: driver C13 a/b/c).
-    // Treating SUSTAINED recirculation as a local inflow with a target
-    // state remains open (work queue item 2).
-    bump(Diag::reversed);
+    // Sustained recirculation as a local inflow is Params::backflow_material.
+    //
+    // The COUNTER carries a roundoff deadband (the closure itself has no
+    // branch left to care): a face holding a quiescent charge sits at
+    // exactly u_out = 0 and the solver's noise dithers the sign, which read
+    // as 314k "reversals" in the first 100 steps of a chamber whose ignition
+    // wave was still a centimetre from the boundary.  Counting only
+    // |u_out| > 1e-9 c keeps "reversal count zero" meaning NO PHYSICAL
+    // BACKFLOW rather than "no roundoff", which is the semantics the
+    // README's advice ("sustained nonzero means a misplaced outflow")
+    // depends on.
+    if (u_out_N < -1.0e-9 * c_N) {
+      bump(Diag::reversed);
+    }
   }
   if (!outflow_face && (u_out_N > 0.0)) {
     // Outflow through a configured inflow would impose D+NUM_SPECIES+1

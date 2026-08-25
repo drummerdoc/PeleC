@@ -121,3 +121,47 @@ through the fixed closure without incident.
 
 Not registered in `Tests/CMakeLists.txt`: at ~1 CPU-hour per variant it is
 an application capstone, not a CI gate.
+
+## The EB follow-ups: the lateral plenum and the baffle
+
+The two deliberate omissions, now built (2026-08-25):
+
+* **`chamber-box.inp`** — the same 1.2 × 0.3 chamber as embedded walls
+  INSIDE a 2.4 × 0.9 box: the vent at x = 1.4 opens into a plenum three
+  chamber heights tall, and the characteristic outflow sits on the far x-hi
+  face a chamber length downstream. This is the duct-plenum comparison with
+  a *lateral* expansion — the geometry T7 actually poses.
+* **`chamber-baffle.inp`** — `chamber-box.inp` plus the Sydney baffle: two
+  plates across the chamber at x = 0.8 (thickness 0.05) leaving a central
+  0.1 gap — 67% blockage. The A/B against `chamber-box.inp` is the baffle's
+  contribution with everything else identical.
+
+Both use one registered geometry (`eb2.geom_type = "nscbc-chamber-box"`,
+built in `prob.cpp` from `prob.chamber_*`/`prob.baffle_*`; the ignition
+kernel follows the EB closed end via `prob.kernel_x`). The whole chamber,
+closed end included, is interior EB — nothing touches a domain face, which
+is the documented EB-at-domain-boundary NaN limitation — and
+`pelec.eb_zero_body_state = 1` is mandatory as in every EB+NSCBC
+configuration. Boundary settings are the flame-crossing recipe, unchanged.
+
+Building these taught two counter lessons on day one. The reversal counter
+read 314k in the first 100 steps, before the ignition wave was within a
+centimetre of the boundary — measured at the face, that is not noise but a
+coherent −0.28 cm/s micro-inflow across the whole outflow (Mach 8×10⁻⁶):
+the EB small-cell fixup leaves the box a hair under-pressurised and the
+σ-relaxation breathes it back in. Real backflow, honestly counted — so
+read the counter with the magnitude of the flow in mind; equilibration
+counts big and means nothing. Separately, the counter now carries a 10⁻⁹c
+deadband (counting only — the closure is branch-free), so a face holding a
+charge at *exactly* u = 0 cannot count pure sign-noise, and a zero count
+means no physical backflow. Also expected: with `eb_zero_body_state = 1`
+the covered cells hold zeroed states, so derived velocities in plotfile
+dumps read NaN *inside the walls* — an artifact of the flag, not of the
+solve.
+
+Cost at dx = 0.0125: 192 × 72 = 13,824 cells, ~120k steps to 8 ms — about
+6× the vent variant. Metrics: `chamber_qoi.py` with `--xvent 1.4` measures
+the chamber interior; note its chamber-mean columns integrate the full
+domain height and so include EB wall cells (zeroed states) — the
+closed-end/vent traces are y-localised enough to read directly, and a
+masked variant is the obvious upgrade if the box A/B becomes a table here.

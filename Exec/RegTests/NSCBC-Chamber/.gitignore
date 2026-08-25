@@ -9,3 +9,5 @@ Backtrace.*
 *.log
 __pycache__/
 *-traces.csv
+box/
+baffle/

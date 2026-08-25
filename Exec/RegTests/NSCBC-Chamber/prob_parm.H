@@ -10,9 +10,12 @@ struct ProbParmDevice
   amrex::Real pamb = 1013250.0;
 
   // Ignition kernel: a half-disc of burnt products centred on the closed-end
-  // wall (x = problo[0]) at height kernel_y * Ly, radius kernel_r [cm].  The
+  // wall at (problo[0] + kernel_x, kernel_y * Ly), radius kernel_r [cm].  The
   // 1-D flame profile is wrapped around its edge by radial signed distance.
+  // kernel_x = 0 is the domain wall (the duct variants); the EB box variants
+  // put the closed end at the chamber's EB back wall.
   amrex::Real kernel_r = 0.1;
+  amrex::Real kernel_x = 0.0;
   amrex::Real kernel_y = 0.5;
 
   // Coordinate of the flame in the 1-D PMF profile (see NSCBC-FlameOutflow).

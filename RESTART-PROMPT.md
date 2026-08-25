@@ -115,12 +115,18 @@ unchanged to the digit; chamber table regenerated (README).
    against the x-hi characteristic outflow) — R = 0.752%, identical to the periodic-y
    baseline to the third digit, y-structure 0.0000%, max|v| 0.000%: the corner is
    invisible. Driver: air 61/61, LiDryer 65/65, SRK 45/45.
-3. **T7 mini-SydGex** — DONE (2026-08-25). Three-variant production set (vent, plenum,
-   vent-σ16) completed with the final kernel; T7 table and phase-resolved analysis are in
-   the case README's Status section; `chamber_qoi.py` (beside `chamber_metrics.py`) is the
-   measurement script. The case's production runs killed three defective reversal closures
-   along the way. Remaining follow-ups: laterally-expanding plenum and the baffle (both
-   need EB).
+3. **T7 mini-SydGex** — DONE (2026-08-25), including the EB follow-ups. Three-variant
+   duct production set (vent, plenum, vent-σ16) with the final kernel; T7 table and
+   phase-resolved analysis in the case README. The EB variants are BUILT and smoked:
+   `chamber-box.inp` (the chamber as interior EB inside a 2.4 × 0.9 box — the lateral
+   plenum) and `chamber-baffle.inp` (plus the Sydney baffle, 67% blockage), one
+   registered geometry `nscbc-chamber-box`, nothing touching a domain face,
+   `eb_zero_body_state = 1`. First production pair launched 2026-08-25 (~5 h at 8
+   ranks each); when the plotfiles land, the box-vs-duct-plenum and baffle-vs-box A/B
+   tables go into the README (note `chamber_qoi.py --xvent 1.4` and its full-height
+   chamber-mean caveat over EB wall cells). Building them found the outflow's
+   equilibration micro-inflow (−0.28 cm/s across the face — real, benignly counted)
+   and put a 1e-9 c roundoff deadband on the reversal counter.
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and
