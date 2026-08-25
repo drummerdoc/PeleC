@@ -27,19 +27,20 @@ pelec.bc_nscbc_extrap_material    = 0
 
 eb2.geom_type = "nscbc-chamber-box"
 pelec.eb_zero_body_state = 1
-prob.chamber_x0  = 0.2
+prob.chamber_x0  = 0.205
+prob.chamber_yc  = 0.455
 prob.chamber_len = 1.2
 prob.chamber_h   = 0.3
 prob.wall_t      = 0.05
 prob.baffle      = 1
-prob.baffle_x    = 0.8
+prob.baffle_x    = 0.805
 prob.baffle_w    = 0.05
 prob.baffle_gap  = 0.1
 
 prob.pamb          = 1013250.0
 prob.kernel_r      = 0.1
-prob.kernel_x      = 0.2
-prob.kernel_y      = 0.5
+prob.kernel_x      = 0.205
+prob.kernel_y      = 0.5055556
 prob.pmf_flame_loc = 3.0
 prob.pmf_datafile  = "LiDryer_H2_p1_phi0_4000tu0300.dat"
 

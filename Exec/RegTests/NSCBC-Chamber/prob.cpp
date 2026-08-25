@@ -31,8 +31,13 @@ NSCBCChamberBox::build(
   pp.query("baffle_w", baffle_w);
   pp.query("baffle_gap", baffle_gap);
 
-  const amrex::Real yc =
-    0.5 * (geom.ProbLo(1) + geom.ProbHi(1)); // chamber centreline
+  // Chamber centreline: defaults to the domain centre, overridable so the
+  // EB surfaces can be placed OFF the grid lines.  Keep them off: a surface
+  // sitting exactly on a cell face makes degenerate cut cells, and the first
+  // grid-aligned build of this geometry NaN'd at the re-entrant interior
+  // corner cell under both hydro schemes.
+  amrex::Real yc = 0.5 * (geom.ProbLo(1) + geom.ProbHi(1));
+  pp.query("chamber_yc", yc);
   const amrex::Real ylo = yc - 0.5 * h, yhi = yc + 0.5 * h;
 
   // bottom and top walls (extended back over the closed end's thickness),

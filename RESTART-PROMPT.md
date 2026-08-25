@@ -115,16 +115,30 @@ unchanged to the digit; chamber table regenerated (README).
    against the x-hi characteristic outflow) — R = 0.752%, identical to the periodic-y
    baseline to the third digit, y-structure 0.0000%, max|v| 0.000%: the corner is
    invisible. Driver: air 61/61, LiDryer 65/65, SRK 45/45.
-3. **T7 mini-SydGex** — DONE (2026-08-25), including the EB follow-ups. Three-variant
-   duct production set (vent, plenum, vent-σ16) with the final kernel; T7 table and
-   phase-resolved analysis in the case README. The EB variants are BUILT and smoked:
-   `chamber-box.inp` (the chamber as interior EB inside a 2.4 × 0.9 box — the lateral
-   plenum) and `chamber-baffle.inp` (plus the Sydney baffle, 67% blockage), one
-   registered geometry `nscbc-chamber-box`, nothing touching a domain face,
-   `eb_zero_body_state = 1`. First production pair launched 2026-08-25 (~5 h at 8
-   ranks each); when the plotfiles land, the box-vs-duct-plenum and baffle-vs-box A/B
-   tables go into the README (note `chamber_qoi.py --xvent 1.4` and its full-height
-   chamber-mean caveat over EB wall cells). Building them found the outflow's
+3. **T7 mini-SydGex** — duct set DONE; EB follow-ups BUILT, production IN PROGRESS
+   (2026-08-25, may have been interrupted by a power loss — CHECK
+   `Exec/RegTests/NSCBC-Chamber/box/` and `baffle/` run.logs before trusting any
+   plotfiles there). State: `chamber-box.inp` (chamber as interior EB in a 2.4 × 0.9
+   box — the lateral plenum) and `chamber-baffle.inp` (+ Sydney baffle, 67% blockage);
+   one registered geometry `nscbc-chamber-box`; `eb_zero_body_state = 1`. THREE
+   production attempts failed and were each diagnosed and fixed in commits: (i) the
+   Godunov path NaN'd at an outer cut-cell corner at 1.4 ms → both inps run
+   `pelec.do_mol = 1` (the EB-supported hydro; box-vs-duct A/B therefore differs in
+   scheme too); (ii) MOL then NaN'd a single cell at the re-entrant interior corner
+   (0.206, 0.306) at 1.25 ms → all EB surfaces were sitting EXACTLY on grid lines
+   (0.2 = 16 dx etc.), the degenerate-cut-cell configuration; the geometry is now
+   placed off-grid at x.4·dx via new `prob.chamber_yc` (x0 = 0.205, yc = 0.455,
+   kernel follows; dimensions still exactly 1.2 × 0.3). The off-grid + MOL
+   combination was smoked but its production had NOT yet cleared the ~1.25–1.4 ms
+   death zone when this note was written — that checkpoint is the first thing to
+   verify on resume (~30 min into a run). If it clears, run both variants to 8 ms
+   (ONE AT A TIME, ≤ 6–8 ranks — the machine browned out under overlapped runs),
+   then build the box-vs-duct-plenum and baffle-vs-box A/B tables into the case
+   README via `chamber_qoi.py --xvent 1.405` (vent lip moved with the off-grid
+   shift; full-height chamber-mean columns include EB wall cells — caveat in the
+   README). If the corner still NaNs off-grid, the next suspect is flame/EB-corner
+   diffusion; try `pelec.eb_srd_max_order` / redistribution options, or an isothermal
+   EB, before questioning the boundary. Building all this also found the outflow's
    equilibration micro-inflow (−0.28 cm/s across the face — real, benignly counted)
    and put a 1e-9 c roundoff deadband on the reversal counter.
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
