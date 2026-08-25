@@ -212,6 +212,32 @@ amrex_probinit(
   pp.query("kernel_r", PeleC::h_prob_parm_device->kernel_r);
   pp.query("kernel_x", PeleC::h_prob_parm_device->kernel_x);
   pp.query("kernel_y", PeleC::h_prob_parm_device->kernel_y);
+
+  // Box variants: clip the ignition structure to the chamber interior (the
+  // closed-end slab is thinner than the kernel radius, and the preheat tail
+  // is thicker than the side walls -- see ProbParmDevice::kernel_clip).
+  {
+    std::string geom_type;
+    amrex::ParmParse ppeb("eb2");
+    ppeb.query("geom_type", geom_type);
+    if (geom_type == "nscbc-chamber-box") {
+      amrex::Real x0 = 0.2, len = 1.2, h = 0.3;
+      amrex::Real yc = 0.5 * (problo[1] + probhi[1]);
+      pp.query("chamber_x0", x0);
+      pp.query("chamber_len", len);
+      pp.query("chamber_h", h);
+      pp.query("chamber_yc", yc);
+      auto* pd = PeleC::h_prob_parm_device;
+      pd->kernel_clip = 1;
+      pd->clip_lo[0] = x0;
+      pd->clip_hi[0] = x0 + len;
+      pd->clip_lo[1] = yc - 0.5 * h;
+      pd->clip_hi[1] = yc + 0.5 * h;
+      amrex::Print() << "     ignition clipped to the chamber interior ["
+                     << pd->clip_lo[0] << ", " << pd->clip_hi[0] << "] x ["
+                     << pd->clip_lo[1] << ", " << pd->clip_hi[1] << "]\n";
+    }
+  }
   pp.query("pmf_flame_loc", PeleC::h_prob_parm_device->pmf_flame_loc);
   pp.query("pmf_datafile", pmf_datafile);
 

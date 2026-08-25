@@ -197,8 +197,16 @@ pc_initdata(
   // Sample the 1-D flame profile at the burnt-side distance from the kernel
   // edge: products inside, fresh charge outside, the laminar structure across
   // the interface.  The charge is QUIESCENT -- the profile's velocity column
-  // is deliberately not used; the kernel starts the flow itself.
-  const amrex::Real sb = kernel_burnt_distance(x, y, geomdata, prob_parm);
+  // is deliberately not used; the kernel starts the flow itself.  In the box
+  // variants the ignition structure is clipped to the chamber interior (see
+  // ProbParmDevice::kernel_clip): outside it, pure fresh charge.
+  amrex::Real sb = kernel_burnt_distance(x, y, geomdata, prob_parm);
+  if (
+    (prob_parm.kernel_clip != 0) &&
+    ((x < prob_parm.clip_lo[0]) || (x > prob_parm.clip_hi[0]) ||
+     (y < prob_parm.clip_lo[1]) || (y > prob_parm.clip_hi[1]))) {
+    sb = -1.0e10; // clamps to the profile's fresh end
+  }
   const amrex::Real xp = prob_parm.pmf_flame_loc + sb;
   amrex::GpuArray<amrex::Real, NUM_SPECIES + 4> pmf_vals = {{0.0}};
   pmf(xp, xp, pmf_vals, prob_parm);

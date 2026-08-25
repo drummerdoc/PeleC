@@ -24,6 +24,18 @@ struct ProbParmDevice
   // Laminar flame speed, from the profile's inlet velocity; banner only.
   amrex::Real s_L = 0.0; // filled by amrex_probinit
 
+  // Box-variant ignition clip: when the chamber is interior EB
+  // (eb2.geom_type = nscbc-chamber-box), the kernel's radial profile must
+  // not exist outside the chamber -- the closed-end slab is thinner than
+  // the kernel radius, so an unclipped disc pokes through it and ignites
+  // the plenum charge behind the chamber, and the PMF preheat tail leaks
+  // past the side walls.  Cells outside [clip_lo, clip_hi] initialise as
+  // pure fresh charge.  Off (kernel_clip = 0) for the duct variants:
+  // bit-identical to the historical IC.
+  int kernel_clip = 0;
+  amrex::GpuArray<amrex::Real, 2> clip_lo = {{0.0, 0.0}};
+  amrex::GpuArray<amrex::Real, 2> clip_hi = {{0.0, 0.0}};
+
   amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> L = {{1.0}};
   int pmf_N = 0;
   int pmf_M = 0;
