@@ -169,7 +169,40 @@ unchanged to the digit; chamber table regenerated (README).
    fill (the store now records its own domain; peek(dom) is the level test). Testing
    traps: NSCBC-Acoustic's GNUmakefile is `USE_MPI=FALSE` — six mpiexec clones race one
    plotfile; multi-rank plotfiles shard `Cell_D`, so compare fields, never files.
-5. Hardware-gated: CUDA/HIP compile, CPU-vs-GPU on NSCBC-Acoustic, register-spill profile.
+5. Hardware-gated: CUDA/HIP compile, CPU-vs-GPU on NSCBC-Acoustic, register-spill
+   profile. STATIC GPU AUDIT DONE (2026-08-25, pre-hardware, NVIDIA-focused) — all
+   branch device code surveyed and one sync gap fixed:
+   * CLEAN: no printf/Abort/std::string/allocation on device paths; finiteness via
+     `amrex::Math::isfinite`; every device lambda captures PODs by value, none touches
+     a class member (no hidden `this`); `PCHypFillExtDir` is all-POD (pointers + POD
+     Params in a GpuArray); reg-index helpers are `AMREX_GPU_HOST_DEVICE`, dimension-
+     generic, and internal-linkage-safe (plain functions — nvcc's extended-lambda
+     linkage restriction applies to lambdas, and every ParallelFor/ReduceOps lambda
+     sits in an external-linkage member function); counters bump via
+     `HostDevice::Atomic::Add(Long*)`; ProbParmDevice structs are POD with raw device
+     pointers, containers live in ProbParmHost (chamber PMF follows the standard
+     pattern); `std::abs` on device matches upstream precedent (Riemann.H/Godunov.H/
+     EB.H) and is supported on CUDA/HIP; NO `AMREX_USE_GPU` ifdefs anywhere in branch
+     code — CPU and GPU compile the identical path, so the A/B is meaningful.
+   * SYNC AUDIT (also clean, one fix): update ends `streamSynchronize`; MFIter loops
+     sync implicitly at destruction; all `Gpu::copy` calls are the blocking variant;
+     wrap-gate uses `rd.value(op)` (syncs internally). FIXED: the counter reset after
+     a report is a device fill on the current stream, unordered against the next
+     advance's fills on MFIter's rotating streams — a zero could land on a fresh
+     count. Now `Device::synchronize()` before the read+reset and `streamSynchronize`
+     after (diagnostics-only race, but counters are evidence and must not lie).
+   * TOMORROW'S PROTOCOL: (1) build — `make realclean; make -j TPL USE_CUDA=TRUE;
+     make -j USE_CUDA=TRUE USE_MPI=TRUE CUDA_ARCH=<sm>` per case (Make.PeleC passes
+     USE_CUDA through to the SUNDIALS TPL; TPL and app configs must match; remember
+     the case GNUmakefiles default USE_MPI=FALSE). (2) correctness — NSCBC-Acoustic
+     planar σ=0.25 row, σ=16 NDNR row, duct NRI point, then a short chamber-box run
+     (EB + do_mol on GPU); compare CPU-vs-GPU field-by-field with fielddump (%.17e):
+     expect agreement to roundoff, NOT bitwise (GPU FMA contraction differs — do not
+     chase bit-identity across architectures; n1-vs-n6 bit-identity is the
+     determinism gate and it is CPU-side). (3) profile — `CUDA_VERBOSE=TRUE` for
+     ptxas register counts on the fill kernel (it carries Y[NUM_SPECIES] locals and
+     the EOS; spill is the expected risk with LiDryer/drm19), then ncu occupancy if
+     it spills. The 1-D driver is a host tool — no GPU work there.
 6. Upstream: curate the branch into an AMReX-Combustion PR when ready.
 
 Start by confirming `git status` is clean (untracked `PAPERS/` is expected) and the driver

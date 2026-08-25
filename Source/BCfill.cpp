@@ -1180,6 +1180,11 @@ PeleC::nscbc_report_diagnostics()
   }
   // Settle any counter atomics still in flight on other streams before the
   // reset; the blocking Gpu::copy above synchronised only its own stream.
-  amrex::Gpu::Device::streamSynchronize();
+  amrex::Gpu::Device::synchronize();
   nscbc_diag().assign(pc_nscbc::Diag::count, 0);
+  // The reset itself is a device fill on the current stream; the next
+  // advance's fills bump these counters from MFIter's rotating streams,
+  // which are not ordered against it.  Settle the reset before returning
+  // so a zero can never land on top of a fresh count.
+  amrex::Gpu::streamSynchronize();
 }
