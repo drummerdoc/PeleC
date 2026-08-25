@@ -154,15 +154,24 @@ material slopes upwinded off — `Docs/NSCBC-reversal-branch-defect.md`,
 driver gate C13) the run is stable through it. Before this case, that path
 had only ever been exercised by a synthetic state in check C6.
 
-**It also caps the benefit.** For cells in reversal the boundary is effectively a
-pressure Dirichlet, so it is not non-reflecting there. That is why the residual
-after the wave has gone improves only ~1.5× over a hard boundary here
-(L2 0.038 vs 0.056 of the incident amplitude) against 120× for the planar case.
-If a problem spends a lot of its time in reversal at an outflow, the honest fix
-is to give that face an inflow target rather than to expect the outflow model to
-cope. The residual number is also not purely boundary error in this case: the
-imploding half of the split pulse passes through the origin and is still in the
-box at the final time.
+**Under the unified closure the reversal no longer caps the benefit.** The
+pin-era closure made every reversed cell effectively a pressure Dirichlet,
+and the residual advantage over a hard boundary collapsed to ~1.5×.
+Re-measured 2026-08-25 with the unified closure (`metrics.py residual`,
+t = 1.35×10⁻⁴): NSCBC max|dp| 0.0118 / L2 0.00060 of the incident amplitude
+against the hard boundary's 0.0627 / 0.0147 — 5× and 24×, with the mean
+pressure held to 0.3 ppm of target (1013249.7 vs 1013250). The boundary
+keeps venting *through* the reversal instead of walling it, and it does so
+while sustaining the full physical re-entry: 15.8 million reversal fills
+over the run (the pin-era report of ~11k per window was the pin choking the
+breathing off early, not less reversal happening). The sphericity table
+above is bit-identical under the closure change — re-measured, every row to
+the digit, both variants — because the front rays it tracks are causally
+ahead of anything the reversed faces emit. The residual is still not purely
+boundary error here (the imploding half of the split pulse is in the box at
+the final time), and for flows that hold an outflow in *sustained*
+recirculation the local-inflow treatment of work-queue item 2 remains the
+right escalation.
 
 ## Duct mode — the PeleC half of driver t3/t5 (`nscbc-acoustic-duct.inp`)
 
