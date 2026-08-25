@@ -25,16 +25,16 @@ to exercise check C7, which is skipped otherwise:
 
 ```sh
 cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
-cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 60/60 (air: 56/56)
+cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 65/65 (air: 61/61)
 ```
 
 Two further build axes, both run in CI (the `NSCBC-Driver` job):
 
 ```sh
-cmake -S . -B build_adv -DAMReX_DIR=... -DPELE_NUM_ADV=2    # 56/56: pack_ghost's
+cmake -S . -B build_adv -DAMReX_DIR=... -DPELE_NUM_ADV=2    # 61/61: pack_ghost's
 cmake --build build_adv && ./build_adv/nscbc1d              # passive-scalar path
 cmake -S . -B build_srk -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer -DPELE_EOS=SRK
-cmake --build build_srk && ./build_srk/nscbc1d              # 43/43 static checks
+cmake --build build_srk && ./build_srk/nscbc1d              # 45/45 static checks
 ```
 
 The SRK build is the EOS-portability claim made checkable: the kernel keeps
@@ -71,7 +71,7 @@ relationships rather than on hard-coded numbers.
 | **C3** | Outflow *extrapolates* composition rather than imposing it; inflow imposes it exactly; `Σ Y = 1` and `UEDEN = UEINT + KE` hold to round-off | Species over-specification at outflow (the legacy defect), or a broken state identity |
 | **C4** | Acoustic reflection of a pressure pulse: below 1% at σ=0.25, essentially zero at σ=0, and 2nd-order extrapolation no worse than 1st | The extrapolation or the invariant algebra is wrong |
 | **C5** | The relaxation is a **rate**: grid-independent, and equal to `K = σ(1−M²)c/L` | The parameterisation has drifted to a value-blend, whose effective rate scales as `c/Δx` and therefore doubles when the mesh does |
-| **C6** | Supersonic, reversed-flow and EB-body-state fallbacks each return a finite physical state and increment their counter | A silent fallback — i.e. a bug that will not be found in production |
+| **C6** | Supersonic, reversed-flow and EB-body-state fallbacks each return a finite physical state and increment their counter; a supersonic INFLOW without `Target.p` is a counted substitution (`target_incomplete`) and with it an exact full-state imposition | A silent fallback — i.e. a bug that will not be found in production; or a supersonic inflow quietly borrowing pressure from a domain it should be causally upstream of |
 | **C7** | The closed-form reaction source `dp/dt|_react` matches a directional finite difference along the reaction path, converging as τ→0; chemistry conserves mass; a cold state gives zero | The thermodynamics of `reaction_dpdt()` is wrong. Skipped automatically when the mechanism has no reactions |
 | **C8** | On a flame-like temperature ramp the entropy closure's ghost overstates the face temperature gradient by 40%; `extrap_temperature` reproduces the ramp exactly and still returns a uniform state to round-off | The diffusion operator reads these ghosts, so this is the conductive heat flux leaving the domain being wrong |
 | **C9** | (a) Extrapolating `R₊` across a normal velocity gradient manufactures ghost pressure `½ρc·ℓ·δu`, exactly, and order 1 gives exactly zero. With `extrap_material`, on the mass-conserving form of the same ramp, the bias vanishes while the ghost keeps the full `du/dn`. (b) A heat band at the boundary produces a σ-suppressed offset that the order control shows is *not* the extrapolation — reported, not gated | The ghost-pressure bias mechanism, isolated. (b) failing to isolate it dynamically is why C10 and C11 exist |
@@ -79,6 +79,7 @@ relationships rather than on hard-coded numbers.
 | **C11** | The sustained ramp: C10's structure plus the manufactured energy source `S_E = ṁ dH/dx` that makes it an exact steady solution straddling the outflow — a flame's mechanical structure minus the chemistry. An *oracle* ghost fill (exact continuation) holds it, so the architecture is sound; the entropy closure drifts 15707 dyn/cm² in 0.7 relaxation times and distorts the face `du/dn` to 175% of exact; `extrap_material` holds those to 3175 and 80%, and cuts the static face-flux error 3.3× | The material-slope continuation is broken, or the late-time columns are being read without their caveat: the frozen source cannot follow a structure the boundary lets slip, so late-time drift is the MMS's artefact, not the boundary's |
 | **C12** | With real conduction in the mini solver and a hot flank in the outflow cells, against a shielded reference: the entropy closure leaks 887 dyn/cm² of boundary error, `extrap_temperature` holds it to 104 | The diffusive boundary physics lives in the ghost **T closure**, not in the wave model — an amplitude-side diffusion source term was built, verified exact on quadratic profiles, measured to double-count (104 → −911 here; +1200 → +1771 in PeleC), and removed |
 | **C13** | (a) The outflow closure is a *continuous* function of the interior normal velocity through `u_out = 0` — a swept flame-like stencil shows no outlier jump in ghost p, u or T at the crossing; (b) an over-pressured transient reversal still relaxes: ghost p toward target AND ghost `u_out` pushed outward; (c) a firm reversal does NOT extrapolate material content: with T falling toward the face, the ghost keeps the interior's own T | The reversal handling has drifted from either of its two proven properties. The 2026-08 NSCBC-Chamber production A/B (`Docs/NSCBC-reversal-branch-defect.md`) caught both failure modes in sequence: a dedicated reversal branch that dropped `dR₊`, `S_p` and `T_in` and froze the ghost velocity put a 4.2e3 dyn/cm² step at `u_out = 0` (vs 1.2e-2 sweep variation, fails a/b) and fed a growing dither and a spurious 0.3 atm spike; unifying the closure *without* upwinding the material slopes (fails c, ghost T 341.5 vs 400 K) instead fed the cold runaway — extrapolated outward-cooling ghosts advected back in, 385 → 89 K in 42 µs, NaN. The shipped closure passes all three: unified acoustics, `w_mat`-upwinded material slopes |
+| **C14** | A duct held in steady INFLOW through an outflow face (lo face relaxes to a low-pressure sink, hi face is an outflow whose Target also carries the 300 K reservoir state; interior starts at 600 K): the frozen-material closure keeps the hi half at 597 K — the domain feeds on its own exhaust — while `backflow_material` flushes it to 299.5 K on the advective clock; a static probe confirms the Mach-[10⁻³,10⁻²] ramp is bit-inert at breathing amplitudes | Sustained recirculation is being fed recycled interior gas (the flag off is that, by design — but the FLUSH failing with the flag on means the reservoir ramp is broken), or the ramp has crept down into breathing amplitudes where the chamber's transient physics must stay frozen |
 
 C4 also measures the **inflow** reflection curve: R = 2.3% / 4.8% / 19% / 57% at `relax_u` = 0.5 / 2 / 10 / 50 — soft inlets swallow acoustics, stiff ones are walls; the default reflects under 5%. And the kernel now carries a **transit guard**: an advisory counter (`material structure`) that fires when |dS| > 5% of ρ per cell sits in an outflow boundary cell — the configuration whose crossing the σ = 0.25 default does not survive.
 

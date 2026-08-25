@@ -167,6 +167,17 @@ bc_nscbc_extrap_temperature bool          false
 # sigma > 0 with this on.  Default false.  Ignored by pin_farfield.
 bc_nscbc_extrap_material    bool          false
 
+# Treat FIRM reversal at an outflow as a local inflow of reservoir gas: under
+# sustained backflow the lambda_0 ghost content ramps from the frozen interior
+# values to the ambient state the face's bcnormal_nscbc Target carries (T, Y,
+# tangential u), over an outward-Mach band [1e-3, 1e-2].  Without it, a face
+# held in recirculation feeds the domain its own exhaust (driver check C14,
+# the flush test); with it, the entering gas carries the reservoir state.
+# Breathing reversals (|M| << 1e-3 at the face) never leave the frozen
+# closure either way.  Requires the problem's outflow Target to supply T > 0
+# (and Y); inert otherwise.  Default false.
+bc_nscbc_backflow_material  bool          false
+
 
 # NOTE: pelec.nscbc_adv and pelec.nscbc_diff were removed here.  They were
 # declared and queried but never read by any live code path -- the

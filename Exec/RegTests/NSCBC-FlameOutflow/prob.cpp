@@ -249,12 +249,14 @@ amrex_probinit(
       << "     STRADDLES the outflow: " << 100.0 * frac
       << "% of the boundary is burnt, " << 100.0 * (1.0 - frac)
       << "% fresh, with the reaction zone crossing at 2 points\n";
-  } else {
-    amrex::Print() << "     WARNING: the sheet does not straddle the outflow "
-                      "at x = "
-                   << xout
-                   << "; the reaction zone is not in the boundary "
-                      "cells and beta_s has nothing to correct\n";
+  } else if (amrex::ParallelDescriptor::IOProcessor()) {
+    // amrex::Warning prints on ALL ranks (Print::AllProcs to the error
+    // stream), so gate it here -- probinit runs everywhere.
+    amrex::Warning(
+      "NSCBC-FlameOutflow: the sheet does not straddle the outflow at x = " +
+      std::to_string(xout) +
+      "; the reaction zone is not in the boundary cells and beta_s has "
+      "nothing to correct");
   }
   amrex::Print() << "     drift speed U - S_L = " << pp_d->u_in - pp_d->s_L
                  << " cm/s (unanchored: the sheet leaves on its own)\n\n";

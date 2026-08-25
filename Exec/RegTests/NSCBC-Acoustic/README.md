@@ -70,8 +70,23 @@ printed digit as before the conversion.
 | inputs | what it is |
 |---|---|
 | `nscbc-acoustic.inp` | 2-D planar; the historical regression |
+| `nscbc-acoustic-corner.inp` | 2-D planar with y WALLS: the wall/NSCBC corner seam |
 | `nscbc-acoustic-3d.inp` | 3-D planar; confirms the kernel builds and runs in 3-D |
 | `nscbc-acoustic-3d-radial.inp` | 3-D radial, **all six faces characteristic** |
+| `nscbc-acoustic-duct.inp` | forced duct: the PeleC half of driver t3/t5 (below) |
+
+### The wall/NSCBC corner (`nscbc-acoustic-corner.inp`)
+
+The planar pulse again, but with `NoSlipWall` above and below instead of
+periodic — so the characteristic outflow at x-hi meets a wall at two
+corners, and the fill's tangential stencils clamp at the wall-adjacent rows.
+The pulse is uniform in y and carries no v, so the exact solution stays
+y-uniform through the crossing: any y-structure in the residual, and any v
+anywhere, is corner-manufactured, with no reference solution needed.
+Measured (2026-08-25, unified reversal closure): upstream-half residual
+R = 0.752% — identical to the periodic-y baseline to the third digit — with
+y-structure 0.0000% of the incident amplitude and max|v| 0.000% of the
+incident velocity. The corner is invisible.
 
 ### Why the radial case exists
 

@@ -1248,6 +1248,19 @@ PeleC::postCoarseTimeStep(amrex::Real cumtime)
 {
   BL_PROFILE("PeleC::postCoarseTimeStep()");
   AmrLevel::postCoarseTimeStep(cumtime);
+
+  // NSCBC counters must never be silent: without this, a run with the
+  // default sum_interval = -1 never calls nscbc_report_diagnostics() and a
+  // boundary counting millions of reversal fills looks identical to one
+  // counting none (that misread happened; see
+  // Docs/NSCBC-reversal-branch-defect.md).  When the user has not opted
+  // into periodic reporting, report on a fixed cadence -- the report only
+  // prints when something actually counted, so healthy runs stay quiet.
+  if (bc_nscbc && verbose > 0 && sum_interval <= 0 && sum_per <= 0.0) {
+    if (parent->levelSteps(0) % 100 == 0) {
+      nscbc_report_diagnostics();
+    }
+  }
 }
 
 void

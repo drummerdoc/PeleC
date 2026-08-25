@@ -1072,6 +1072,50 @@ check_fallbacks()
     "reversed flow at outflow -> counted, standard closure",
     "counted, state finite (continuity and relaxation gated by C13)");
 
+  // supersonic inflow: every characteristic is incoming, the FULL state is
+  // required.  A Target without a pressure is counted (target_incomplete)
+  // and the interior pressure substituted -- visible, not silent; with the
+  // pressure supplied the imposition is exact.
+  {
+    pc_nscbc::Target sin_t;
+    sin_t.type = pc_nscbc::Type::inflow;
+    sin_t.T = 400.0;
+    sin_t.u[0] = -8.0e4; // into the domain through the hi face, supersonic
+    for (int k = 0; k < NUM_SPECIES; k++) {
+      sin_t.Y[k] = Y[k];
+    }
+    set_state(sN, rho, -8.0e4, cs.T0, Y);
+    char buf[220];
+
+    pc_nscbc::apply(sN, sN, sN, 3, dx, 0, -1, 1, sin_t, prm, sg, diag);
+    const pc_nscbc::CellPrim qg0 = pc_nscbc::cell_primitives(sg);
+    std::snprintf(
+      buf, sizeof(buf),
+      "counted %lld; ghost T %.1f (target 400), p %.4g (interior %.4g "
+      "substituted)",
+      static_cast<long long>(diag[pc_nscbc::Diag::target_incomplete]), qg0.T,
+      qg0.p, cs.p0);
+    check(
+      (diag[pc_nscbc::Diag::target_incomplete] == 1) &&
+        (std::abs(qg0.T - 400.0) < 1.0e-6 * 400.0) &&
+        (std::abs(qg0.p - cs.p0) < 1.0e-6 * cs.p0),
+      "supersonic inflow without Target.p -> counted substitution", buf);
+
+    sin_t.p = 1.2 * cs.p0;
+    pc_nscbc::apply(sN, sN, sN, 3, dx, 0, -1, 1, sin_t, prm, sg, diag);
+    const pc_nscbc::CellPrim qg1 = pc_nscbc::cell_primitives(sg);
+    std::snprintf(
+      buf, sizeof(buf), "ghost p %.6g vs target %.6g, T %.2f, counter still "
+      "%lld",
+      qg1.p, 1.2 * cs.p0, qg1.T,
+      static_cast<long long>(diag[pc_nscbc::Diag::target_incomplete]));
+    check(
+      (diag[pc_nscbc::Diag::target_incomplete] == 1) &&
+        (std::abs(qg1.p - 1.2 * cs.p0) < 1.0e-6 * cs.p0) &&
+        (std::abs(qg1.T - 400.0) < 1.0e-6 * 400.0),
+      "supersonic inflow with Target.p -> exact full-state imposition", buf);
+  }
+
   // EB body state in the stencil
   Real body[NVAR];
   for (int v = 0; v < NVAR; v++) {
@@ -1258,6 +1302,144 @@ check_reversal_continuity()
     check(
       std::abs(qg.T - qN.T) < 1.0e-3 * qN.T,
       "firm reversal freezes material: ghost T is the interior's", buf);
+  }
+}
+
+// C14: sustained recirculation.  A duct held in steady INFLOW through a face
+//      configured as an outflow: the lo face relaxes hard toward a low
+//      pressure (the sink), the hi face is an outflow at ambient whose
+//      Target also carries the reservoir state (T, Y).  Gas enters through
+//      the hi face for the whole run -- not a breath but a regime, the
+//      configuration queue item 2 was written for.  The material question is
+//      what the entering gas carries: the frozen-material reversal closure
+//      recycles the interior state, so a hot domain drawing from a cold
+//      reservoir stays hot on its own exhaust forever (the measured negative
+//      control); with backflow_material the lambda_0 ghost content ramps to
+//      the reservoir state under firm reversal and the domain flushes cold
+//      on the advective clock.  A static continuity probe confirms the ramp
+//      is inert at breathing amplitudes (|M| < 1e-3).
+Real
+c14_run_flush(bool backflow, Real T_hot, Real T_res, Real dp_sink, Real t_end)
+{
+  Case cs;
+  cs.n = 100;
+  cs.L = 2.5;
+  Field f(cs.n), g(cs.n), h(cs.n);
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  auto eos = pele::physics::PhysicsType::eos();
+  const Real dx = cs.L / cs.n;
+  Real rho_h = 0.0, e_h = 0.0;
+  eos.PYT2RE(cs.p0, Y, T_hot, rho_h, e_h);
+  for (int i = -NG; i < cs.n + NG; i++) {
+    set_state(f.at(i), rho_h, 0.0, T_hot, Y);
+  }
+
+  pc_nscbc::Params prm;
+  prm.L_ref = cs.L;
+  prm.sigma = 2.0;
+  prm.backflow_material = backflow;
+  pc_nscbc::Target sink, res;
+  sink.type = pc_nscbc::Type::outflow;
+  sink.p = cs.p0 - dp_sink;
+  res.type = pc_nscbc::Type::outflow;
+  res.p = cs.p0;
+  res.T = T_res; // the reservoir state the backflow may draw on
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    res.Y[k] = Y[k];
+  }
+
+  Real t = 0.0;
+  while (t < t_end) {
+    Real cmax = 0.0;
+    for (int i = 0; i < cs.n; i++) {
+      const Prim q = get_prim(f.at(i));
+      cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+    }
+    Real dt = cs.cfl * dx / cmax;
+    dt = std::min(dt, t_end - t);
+    if (dt <= 0.0) {
+      break;
+    }
+    fill_bcs(f, sink, res, prm, dx);
+    stage(f, g, dx, dt);
+    fill_bcs(g, sink, res, prm, dx);
+    stage(g, h, dx, dt);
+    for (int i = 0; i < cs.n; i++) {
+      for (int v = 0; v < NVAR; v++) {
+        f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+      }
+    }
+    t += dt;
+  }
+  // Mean temperature of the half nearest the reversed (hi) face.
+  Real Tm = 0.0;
+  for (int i = cs.n / 2; i < cs.n; i++) {
+    Tm += get_prim(f.at(i)).T;
+  }
+  return Tm / (cs.n - cs.n / 2);
+}
+
+void
+check_sustained_recirculation()
+{
+  const Real T_hot = 600.0, T_res = 300.0, dp_sink = 5.0e4;
+  const Real t_end = 4.0e-3;
+  char buf[220];
+
+  const Real T_frozen = c14_run_flush(false, T_hot, T_res, dp_sink, t_end);
+  const Real T_flush = c14_run_flush(true, T_hot, T_res, dp_sink, t_end);
+  std::snprintf(
+    buf, sizeof(buf),
+    "hi-half mean T: frozen closure %.1f K, backflow_material %.1f K "
+    "(interior 600, reservoir 300)",
+    T_frozen, T_flush);
+  check(
+    T_frozen > 0.8 * T_hot,
+    "frozen material recycles: the domain feeds on its own exhaust", buf);
+  check(
+    std::abs(T_flush - T_res) < 0.15 * T_res,
+    "backflow_material flushes to the reservoir state", buf);
+
+  // Continuity at breathing amplitude: at |M| ~ 1e-4 the ramp must be inert
+  // -- the ghost with the flag on is the ghost with it off.
+  {
+    Case cs;
+    Real Y[NUM_SPECIES];
+    for (int k = 0; k < NUM_SPECIES; k++) {
+      Y[k] = air_Y(k);
+    }
+    auto eos = pele::physics::PhysicsType::eos();
+    const Real dx = cs.L / cs.n;
+    Real rho = 0.0, e = 0.0;
+    eos.PYT2RE(1.05 * cs.p0, Y, 500.0, rho, e);
+    Real sN[NVAR], sg_off[NVAR], sg_on[NVAR];
+    set_state(sN, rho, -4.0, 500.0, Y); // |M| ~ 1e-4: a breath
+    pc_nscbc::Params prm;
+    prm.L_ref = cs.L;
+    pc_nscbc::Target res;
+    res.type = pc_nscbc::Type::outflow;
+    res.p = cs.p0;
+    res.T = 300.0;
+    for (int k = 0; k < NUM_SPECIES; k++) {
+      res.Y[k] = Y[k];
+    }
+    prm.backflow_material = false;
+    pc_nscbc::apply(sN, sN, sN, 3, dx, 0, -1, 1, res, prm, sg_off);
+    prm.backflow_material = true;
+    pc_nscbc::apply(sN, sN, sN, 3, dx, 0, -1, 1, res, prm, sg_on);
+    Real dmax = 0.0;
+    for (int v = 0; v < NVAR; v++) {
+      dmax = std::max(
+        dmax, std::abs(sg_on[v] - sg_off[v]) /
+                std::max(std::abs(sg_off[v]), 1.0e-30));
+    }
+    std::snprintf(buf, sizeof(buf), "max relative ghost difference %.2e", dmax);
+    check(
+      dmax < 1.0e-12,
+      "the ramp is inert at breathing amplitudes (|M| ~ 1e-4)", buf);
   }
 }
 
@@ -3326,6 +3508,14 @@ main(int argc, char* argv[])
     check_fallbacks();
     std::printf("\nC13 outflow reversal: continuity and relaxation\n");
     check_reversal_continuity();
+#ifndef USE_SRK_EOS
+    std::printf("\nC14 sustained recirculation: the backflow material\n");
+    check_sustained_recirculation();
+#else
+    std::printf(
+      "\nC14 sustained recirculation: dynamic halves SKIPPED under SRK "
+      "(EOS-independent; gated under Fuego)\n");
+#endif
     std::printf("\nC7  reaction source term\n");
     check_reaction_source();
     std::printf("\nC8  diffusive behaviour of the ghost\n");

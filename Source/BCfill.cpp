@@ -496,15 +496,15 @@ PeleC::nscbc_check_fine_faces() const
         // level-local, so the fine patch imposes a DIFFERENT boundary
         // condition than the coarse level does on the same face -- a
         // level-dependent artefact that refining cannot remove.
-        amrex::Print()
-          << "\nNSCBC WARNING: level " << level << " grids touch the domain "
-          << (side == 0 ? "lo" : "hi") << " face in direction " << dir
-          << ", which is a Hard/UserBC face with pelec.bc_nscbc = 1.\n"
-          << "  The characteristic fill's stencil is level-local, so a "
-             "refined patch on a characteristic face makes the boundary\n"
-          << "  condition level-dependent.  Keep refinement away from "
-             "characteristic faces (see the BCs chapter).\n"
-          << "  (This warning is printed once per face.)\n\n";
+        amrex::Warning(
+          "NSCBC: level " + std::to_string(level) +
+          " grids touch the domain " + (side == 0 ? "lo" : "hi") +
+          " face in direction " + std::to_string(dir) +
+          ", which is a Hard/UserBC face with pelec.bc_nscbc = 1. The "
+          "characteristic fill's stencil is level-local, so a refined patch "
+          "on a characteristic face makes the boundary condition "
+          "level-dependent. Keep refinement away from characteristic faces "
+          "(see the BCs chapter). (This warning is printed once per face.)");
       }
     }
   }
@@ -710,6 +710,7 @@ PeleC::nscbc_params(const int idir)
   const auto& geom = amrex::DefaultGeometry();
   p.extrap_temperature = bc_nscbc_extrap_temperature;
   p.extrap_material = bc_nscbc_extrap_material;
+  p.backflow_material = bc_nscbc_backflow_material;
   p.L_ref = geom.ProbHi(idir) - geom.ProbLo(idir);
   return p;
 }
@@ -737,7 +738,7 @@ PeleC::nscbc_report_diagnostics()
     h[pc_nscbc::Diag::reversed] +
     h[pc_nscbc::Diag::body_state] + h[pc_nscbc::Diag::eos_failure] +
     h[pc_nscbc::Diag::floored] + h[pc_nscbc::Diag::transverse_drop] +
-    h[pc_nscbc::Diag::source_drop];
+    h[pc_nscbc::Diag::source_drop] + h[pc_nscbc::Diag::target_incomplete];
   const amrex::Long structure = h[pc_nscbc::Diag::structure];
   if (
     amrex::ParallelDescriptor::IOProcessor() &&
@@ -750,7 +751,9 @@ PeleC::nscbc_report_diagnostics()
                    << h[pc_nscbc::Diag::floored] << ",  transverse dropped "
                    << h[pc_nscbc::Diag::transverse_drop]
                    << ",  source dropped "
-                   << h[pc_nscbc::Diag::source_drop] << "\n";
+                   << h[pc_nscbc::Diag::source_drop]
+                   << ",  target incomplete "
+                   << h[pc_nscbc::Diag::target_incomplete] << "\n";
     if (structure > 0) {
       // Advisory, not a fallback: a front is in the outflow boundary cells,
       // which is the configuration the flame closures exist for.

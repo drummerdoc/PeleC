@@ -220,9 +220,18 @@ In an outward-normal frame the wave speeds are :math:`u_n - c`, :math:`u_n` (wit
 
 The implementation dispatches on the local Mach number and handles all of these, including transient flow reversal
 through a face, without any user intervention. A reversed outflow (transient backflow, as in a chamber ringing
-down through its vent) keeps the same soft treatment as the forward case — the ghost pressure relaxes toward the
-target at the :math:`\sigma`-rated strength rather than being pinned to it, so the closure is continuous through
-:math:`u = 0`.
+down through its vent) runs through the *same* closure as forward outflow — the relaxation is restoring in both
+pressure and velocity on both sides of :math:`u = 0` — with the material (:math:`\lambda_0`) slopes upwinded off
+during the reversal, so the ghost keeps the interior's material values while the acoustics keep venting. For a
+face held in *sustained* recirculation, ``bc_nscbc_backflow_material = 1`` additionally ramps the entering
+material content to the reservoir state the problem's outflow Target supplies (T, Y, tangential u), over an
+outward-Mach band :math:`[10^{-3}, 10^{-2}]`; without it the domain draws on its own exhaust (driver check C14,
+the flush test). Breathing reversals never leave the frozen closure either way. A supersonic *inflow* whose
+Target carries no pressure is counted (``target incomplete``) rather than silently completed from the interior.
+
+The diagnostic counters report through ``pelec.sum_interval``; when that is left at its default (off), the
+counters are reported every 100 coarse steps anyway — the report prints only when something actually counted,
+so healthy runs stay quiet, but a boundary counting reversals can never look identical to one counting none.
 
 Controls
 """"""""
@@ -245,6 +254,7 @@ needs to be changed.
    ``pelec.bc_nscbc_pin_farfield``     0          Pin the incoming acoustic instead of relaxing it.
    ``pelec.bc_nscbc_extrap_temperature`` 0        Give the outflow face a controlled conductive flux.
    ``pelec.bc_nscbc_extrap_material``  0          Continue material structure through the outflow.
+   ``pelec.bc_nscbc_backflow_material`` 0         Sustained backflow enters with the Target's reservoir state.
    ==================================  =========  ==========================================================
 
 **All of these are positive.** The legacy Fortran implementation required ``relax_T`` to be negative and its

@@ -152,6 +152,19 @@ struct Params
   // README.md).  pin_farfield ignores it.
   bool extrap_material = false;
 
+  // Treat FIRM reversal at an outflow as a local inflow of reservoir gas:
+  // under sustained backflow the lambda_0 ghost content ramps from the
+  // frozen interior values (the transient-breathing closure) to the ambient
+  // state the face's Target carries (tgt.T, tgt.Y, tangential tgt.u), over
+  // an outward-Mach band [1e-3, 1e-2] -- continuous with w_mat's band below
+  // it, fully reservoir by Mach 0.01.  Without this, a face in sustained
+  // recirculation feeds the domain its own exhaust: a hot domain drawing
+  // from a cold reservoir never cools (driver C14, the flush test).  Only
+  // active when the Target supplies a physical state (tgt.T > 0); breathing
+  // reversals (chamber ring-down, radial rarefaction: |M| << 1e-3 at the
+  // face) never leave the frozen closure.  Default false.
+  bool backflow_material = false;
+
   // Boundary-normal reference length, probhi[idir] - problo[idir].  Filled per
   // face by the caller.  Only the ratio sigma/L_ref is physical, so this is
   // not a user knob; it exists so that sigma keeps its literature meaning.
@@ -254,6 +267,11 @@ enum : int {
   floored,         // a positivity floor was hit
   transverse_drop, // a transverse derivative was unavailable or unusable
   source_drop,     // a modelled source term was unavailable or unusable
+  target_incomplete, // a supersonic inflow whose Target carries no pressure:
+                     // every characteristic is incoming, so the FULL state is
+                     // required; the interior pressure was substituted, which
+                     // makes the ghost depend on a domain it should be
+                     // causally upstream of.  Set Target.p in bcnormal_nscbc.
   structure,       // ADVISORY, not a fallback: material structure sat in an
                    // outflow boundary cell (|dS| > 5% of rho).  A front at
                    // the boundary wants the flame closures --
@@ -573,8 +591,14 @@ apply(
       return;
     }
     // Supersonic inflow: every characteristic is incoming, so the full state
-    // is specified.  Only meaningful with an inflow target.
+    // is specified.  Only meaningful with an inflow target.  A Target
+    // without a pressure under-specifies it: the interior pressure is
+    // substituted and COUNTED (target_incomplete), because the ghost then
+    // depends on a domain it should be causally upstream of.
     if (tgt.type == Type::inflow) {
+      if (!(tgt.p > 0.0)) {
+        bump(Diag::target_incomplete);
+      }
       amrex::Real rho_g = 0.0, e_g = 0.0;
       eos.PYT2RE(tgt.p > 0.0 ? tgt.p : qN.p, tgt.Y, tgt.T, rho_g, e_g);
       if (
@@ -899,6 +923,45 @@ apply(
       }
       eos.RYP2T(rho_g, Y_g, p_g, T_g);
       eos.RTY2E(rho_g, T_g, Y_g, e_g);
+    }
+
+    // Sustained-backflow material (see Params::backflow_material): under
+    // firm reversal the lambda_0 content ramps from the frozen interior
+    // values just computed to the reservoir state the Target carries.  The
+    // ramp starts where w_mat's band ends (outward Mach -1e-3) and is
+    // complete by Mach -1e-2, so breathing reversals never feel it, and the
+    // acoustic side is untouched -- p_g stays the relaxation's.
+    if (prm.backflow_material && (u_out_N < 0.0) && (tgt.T > 0.0)) {
+      const amrex::Real m_lo = 1.0e-3, m_hi = 1.0e-2;
+      const amrex::Real w_rev = amrex::min<amrex::Real>(
+        amrex::max<amrex::Real>((-mach - m_lo) / (m_hi - m_lo), 0.0), 1.0);
+      if (w_rev > 0.0) {
+        amrex::Real Ysum = 0.0;
+        for (int n = 0; n < NUM_SPECIES; n++) {
+          Y_g[n] = (1.0 - w_rev) * Y_g[n] +
+                   w_rev * amrex::max<amrex::Real>(tgt.Y[n], 0.0);
+          Ysum += Y_g[n];
+        }
+        if (Ysum > constants::very_small_num()) {
+          const amrex::Real inv = 1.0 / Ysum;
+          for (int n = 0; n < NUM_SPECIES; n++) {
+            Y_g[n] *= inv;
+          }
+        }
+        T_g = (1.0 - w_rev) * T_g + w_rev * tgt.T;
+        for (int d = 0; d < 3; d++) {
+          if (d != idir) {
+            u_g[d] = (1.0 - w_rev) * u_g[d] + w_rev * tgt.u[d];
+          }
+        }
+        const amrex::Real T_floor = amrex::max<amrex::Real>(
+          1.0e-3 * qN.T, constants::very_small_num());
+        if (!amrex::Math::isfinite(T_g) || (T_g < T_floor)) {
+          T_g = T_floor;
+          bump(Diag::floored);
+        }
+        eos.PYT2RE(p_g, Y_g, T_g, rho_g, e_g);
+      }
     }
   } else {
     // Inflow.  One dimensionless nudge factor shared by temperature and the

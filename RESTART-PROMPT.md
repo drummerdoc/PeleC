@@ -103,8 +103,18 @@ unchanged to the digit; chamber table regenerated (README).
    Measurement note: detrend before Fourier-projecting at small relax_u (mean wander
    leaks as spurious amplitude; measured up to I_u = 0.73 of pure leak). The t3 table
    is the standing motivation for queue item 4's NRI-style registers.
-2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
-   wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
+2. **Phase-1 coverage** — DONE (2026-08-25), all four sub-items. Sustained recirculation:
+   `bc_nscbc_backflow_material` ramps the entering lambda_0 content to the Target's
+   reservoir state over an outward-Mach band [1e-3, 1e-2] (breathing stays frozen);
+   gate C14, the flush test — frozen closure holds a hot duct at 597 K on its own
+   exhaust, the flag flushes it to 299.5 K against a 300 K reservoir, and the ramp is
+   bit-inert at |M| ~ 1e-4. Supersonic inflow without `Target.p` is a COUNTED
+   substitution (`target_incomplete`, C6-gated both ways). Counters can no longer be
+   silent: with `sum_interval` unset, the report runs every 100 coarse steps and prints
+   only when something counted. Wall/NSCBC corner: `nscbc-acoustic-corner.inp` (y-walls
+   against the x-hi characteristic outflow) — R = 0.752%, identical to the periodic-y
+   baseline to the third digit, y-structure 0.0000%, max|v| 0.000%: the corner is
+   invisible. Driver: air 61/61, LiDryer 65/65, SRK 45/45.
 3. **T7 mini-SydGex** — DONE (2026-08-25). Three-variant production set (vent, plenum,
    vent-σ16) completed with the final kernel; T7 table and phase-resolved analysis are in
    the case README's Status section; `chamber_qoi.py` (beside `chamber_metrics.py`) is the
