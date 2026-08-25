@@ -17,7 +17,9 @@ full reasoning — the commit messages are the lab notebook.
   `PELE_PHYSICS_HOME=` on every make line (PeleC's own submodule is uninitialised; SUNDIALS is
   prebuilt under that tree's `ThirdParty/INSTALL`, no `make TPL` needed). `COMP=llvm`.
 * The 1-D driver builds in seconds; a 2-D case exe in ~5 min; the flame matrices run in
-  minutes to ~2 h. Run sims in the background and poll. `make realclean COMP=llvm` before
+  minutes to ~2 h. Run sims in the background and poll — ONE production job at a time,
+  at 6 MPI ranks (Marc's standing rule: overlapped 8-rank runs browned the laptop out);
+  throttle builds to `make -j4` while a run is live. `make realclean COMP=llvm` before
   rebuilding the driver after a `Chemistry_Model` switch OR a kernel edit — make will not
   notice either on its own (the exe target has no prerequisites), and realclean without
   `COMP=` cleans the wrong suffix and silently does nothing.

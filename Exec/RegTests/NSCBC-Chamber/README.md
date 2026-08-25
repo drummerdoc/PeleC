@@ -148,8 +148,9 @@ RegTest in the tree attests — the Godunov path died first), with the EB
 surfaces placed OFF the grid lines (x.4·dx via `prob.chamber_yc`; a surface
 on a cell face makes degenerate cut cells), and — the one that actually
 mattered — **`pelec.eb_isothermal = 0`**. PeleC's EB walls default to
-ISOTHERMAL AT `eb_boundary_T` = 1 KELVIN, and the first three production
-attempts all died of it: the quadratic EB gradient faithfully conducts heat
+isothermal, and `eb_boundary_T` DEFAULTED TO 1 KELVIN when these variants
+were built (since changed to 300 K because of this case); the first three
+production attempts all died of it: the quadratic EB gradient faithfully conducts heat
 into a 1 K wall, the cut cells refrigerate first (vfrac = 0.6 row at 268 K
 by 25 µs, marching to 77 K by 1.6 ms), the corner where two cold walls meet
 is coldest, and the arriving flame NaNs there — under either hydro scheme,
