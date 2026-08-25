@@ -406,11 +406,47 @@ manoeuvre into something any σ survives.** With eT = 1 and β_s = 0 the front
 crosses on schedule at every σ measured, and the transit disturbance falls
 7–10× against β_s = 1 at the same σ (+9119 → −1224 at σ = 1; +24523 → +2422
 at σ = 0.25). At σ = 16 the characteristic boundary is now *quieter during
-the crossing than the hard Dirichlet* (−110 against −147). The physics: while
-the reaction zone is in the boundary cells the crossing is a dilatational
-event the relaxation has no model for; β_s = 0 hands the incoming wave the
-exact chemical dp/dt, so the boundary passes the expansion instead of
-integrating it into the ramp that used to push the front back.
+the crossing than the hard Dirichlet* (−110 against −147).
+
+The physics, spelled out because the phrase "no model for dilatation" is
+easy to over-read. The bare relaxation L_in = K(p − p_target) has its fixed
+point at p = p_target with L_in = 0: the equilibrium it relaxes toward is a
+uniform, source-free stream — correct for the LODI limit it comes from. A
+reaction zone in the boundary cells breaks that assertion: the pressure
+equation in characteristic form is ∂p/∂t = −½(L₊ + L₋) + S_p, so a steady
+front on the face needs ½(L₊ + L₋) = S_p — sustained heat release is
+sustained dilatation, and the expansion must leave through the waves. The
+outgoing L₊, measured from the interior, carries its share automatically;
+the bare incoming model supplies zero at p = p_target, so the unbalanced
+source integrates into overpressure until the relaxation cancels it —
+a standing offset ∝ S_p/K, i.e. ∝ σ⁻¹, which is exactly the measured
+2377 → 255 column and why σ = 16 was the only working configuration before
+Phase 0. β_s = 0 adds the missing term (+S_p on L_in, Sutherland–Kennedy):
+the steady balance then closes AT p_target, and it is transit-safe because
+S_p is an instantaneous pointwise measurement that asserts nothing about
+persistence and vanishes as the reaction zone leaves.
+
+This is not a formulation gap so much as a slot that was empty. Dilatation
+is not a characteristic variable; it splits into a normal part (shared
+between R₊ and R₋) and a transverse part, and the formulation has exactly
+three places for it, all now populated: chemical normal dilatation on the
+amplitude side (β_s, above); transverse dilatation on the amplitude side
+(the γp ∇_t·u_t piece of the β term); and the front's mechanical structure
+(the mass-conservation velocity rise) on the material side — order-2
+slopes, `extrap_material`'s entropy-bounded continuation, the ghost T
+closure. (The diffusive dp/dt deliberately stays OFF the amplitude side:
+the diffusion operator reads the ghosts, so the ghost T closure already
+carries it and an amplitude term double-counts — C12, 104 → −911.) What
+genuinely cannot be added in this formulation is narrower: classifying the
+measured du/dn at one instant as sustained structure (continue it),
+transiting structure (release it — continuing over-vents, the measured
+eM-during-transit failure), or acoustics (extrapolating feeds back, C5).
+The fill is a pure function of the instantaneous interior state — the
+determinism invariant — and those three have identical instantaneous
+signatures with opposite correct responses. The measured ways out are the
+C11x source-consistency bound (admit only the du/dn the local sources can
+sustain, du/dn = S_p/ρc², per the same Sutherland–Kennedy relation) and
+the queue-item-4 trend registers (history, kept outside the fill).
 
 **The blocked state is the failure the closures half-on produce, and each
 generation of the reversal closure reported it differently — only the
