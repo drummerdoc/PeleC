@@ -72,7 +72,9 @@ pc_initdata(
 
   // Distance from the pulse, and the direction the pulse runs in.  For the
   // planar pulse that direction is +x everywhere; for the radial pulse the
-  // wave is at rest initially and no direction is needed at all.
+  // wave is at rest initially and no direction is needed at all.  The duct
+  // (pulse_type = 2) has no pulse: a uniform stream at u0, forced only
+  // through the boundary target.
   amrex::Real s = 0.0;
   if (prob_parm.pulse_type == 0) {
     s = xv[0] - prob_parm.xc[0];
@@ -83,8 +85,11 @@ pc_initdata(
     s = std::sqrt(AMREX_D_TERM(d[0] * d[0], +d[1] * d[1], +d[2] * d[2]));
   }
 
-  const amrex::Real dp = prob_parm.amp * prob_parm.p_amb *
-                         std::exp(-(s / prob_parm.w) * (s / prob_parm.w));
+  const amrex::Real dp =
+    (prob_parm.pulse_type == 2)
+      ? 0.0
+      : prob_parm.amp * prob_parm.p_amb *
+          std::exp(-(s / prob_parm.w) * (s / prob_parm.w));
 
   // Isentropic in both cases: drho = dp / c^2.  The planar pulse is given the
   // right-running velocity dp = rho c u so that it is a single wave; the
@@ -97,6 +102,8 @@ pc_initdata(
   amrex::Real vel[AMREX_SPACEDIM] = {AMREX_D_DECL(0.0, 0.0, 0.0)};
   if (prob_parm.pulse_type == 0) {
     vel[0] = dp / (prob_parm.rho_amb * prob_parm.cs_amb);
+  } else if (prob_parm.pulse_type == 2) {
+    vel[0] = prob_parm.u0;
   }
   const amrex::Real ke =
     0.5 * AMREX_D_TERM(vel[0] * vel[0], +vel[1] * vel[1], +vel[2] * vel[2]);
@@ -189,11 +196,31 @@ struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
     const amrex::Real* /*s_int[NVAR]*/,
     const int idir,
     const int sgn,
-    const amrex::Real /*time*/,
+    const amrex::Real time,
     amrex::GeometryData const& /*geomdata*/,
     ProbParmDevice const& prob_parm)
   {
     pc_nscbc::Target t;
+    if (prob_parm.pulse_type == 2) {
+      // The duct: a characteristic INFLOW at x-lo whose velocity target
+      // carries the harmonic forcing -- the time argument this hook always
+      // received, finally consumed.  x-hi stays `off`, so the plumbing falls
+      // back to bcnormal's hard-pressure ghost: the fully reflecting far end.
+      if ((idir == 0) && (sgn == +1)) {
+        t.type = pc_nscbc::Type::inflow;
+        t.u[0] = prob_parm.u0 +
+                 prob_parm.force_amp *
+                   std::sin(
+                     2.0 * amrex::Math::pi<amrex::Real>() *
+                     prob_parm.force_freq * time);
+        t.T = prob_parm.T_amb;
+        t.Y[0] = 1.0;
+        for (int n = 1; n < NUM_SPECIES; n++) {
+          t.Y[n] = 0.0;
+        }
+      }
+      return t;
+    }
     const bool live =
       (prob_parm.pulse_type == 0) ? ((idir == 0) && (sgn == -1)) : true;
     if (live) {

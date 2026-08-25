@@ -19,7 +19,17 @@ struct ProbParmDevice
   //     reaches the faces at normal incidence, the edges at 45 degrees and the
   //     corners at the body diagonal, all in one run, which is what makes it
   //     the test of corner and edge ownership rather than of the 1-D algebra.
+  // 2 = DUCT (tests T3/T5): no pulse; a uniform mean inflow u0 along +x, a
+  //     harmonic velocity forcing on the x-lo characteristic INFLOW target,
+  //     and x-hi left to the hard-pressure bcnormal -- the fully reflecting
+  //     far end.  The PeleC half of the driver's t3/t5 injection-fidelity
+  //     modes (Verification/NSCBC1D/README.md).
   int pulse_type = 0;
+
+  // Duct-mode (pulse_type = 2) parameters.
+  amrex::Real u0 = 0.0;         // mean inflow [cm/s]
+  amrex::Real force_amp = 0.0;  // forcing amplitude on the u target [cm/s]
+  amrex::Real force_freq = 0.0; // forcing frequency [Hz]
 
   // Pulse centre and width, as fractions of the domain extent in each
   // direction.  For pulse_type = 0 only the first component of x0 is used and

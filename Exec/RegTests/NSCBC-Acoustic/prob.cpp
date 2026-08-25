@@ -22,6 +22,9 @@ amrex_probinit(
     pp.query("amp", pp_d->amp);
     pp.query("width", pp_d->width);
     pp.query("pulse_type", pp_d->pulse_type);
+    pp.query("u0", pp_d->u0);
+    pp.query("force_amp", pp_d->force_amp);
+    pp.query("force_freq", pp_d->force_freq);
 
     // x0 accepts either a single value -- the historical spelling, which sets
     // the streamwise position of the planar pulse -- or one per direction.
@@ -71,7 +74,17 @@ amrex_probinit(
   amrex::Print() << "\n  NSCBC-Acoustic (" << AMREX_SPACEDIM
                  << "D): rho_amb = " << rho << " g/cc, c_amb = " << cs
                  << " cm/s\n";
-  if (pp_d->pulse_type == 0) {
+  if (pp_d->pulse_type == 2) {
+    // Quarter-wave frequency of the duct, Doppler-corrected -- the resonance
+    // t3/t5 straddle.  Printed so the launch script never re-derives it.
+    const amrex::Real f0 =
+      (cs * cs - pp_d->u0 * pp_d->u0) / (4.0 * L[0] * cs);
+    amrex::Print() << "     DUCT: u0 = " << pp_d->u0 << " cm/s, forcing "
+                   << pp_d->force_amp << " cm/s at " << pp_d->force_freq
+                   << " Hz\n"
+                   << "     quarter-wave f0 = " << f0
+                   << " Hz  (t_a = " << 2.0 * L[0] / cs << " s)\n\n";
+  } else if (pp_d->pulse_type == 0) {
     amrex::Print() << "     PLANAR pulse at x = " << pp_d->xc[0] << " cm, "
                    << "width " << pp_d->w << " cm, running toward x-hi\n"
                    << "     transit to the outflow = "

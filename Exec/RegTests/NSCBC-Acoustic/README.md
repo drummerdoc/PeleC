@@ -143,14 +143,15 @@ body-state stencil degradations and completes cleanly.
 
 ### Two things this case turned up
 
-**The flow-reversal fallback is not hypothetical.** Running with
+**The flow-reversal path is not hypothetical.** Running with
 `pelec.sum_interval > 0`, the counters read zero everywhere until the pulse
 leaves and then report `flow reversal 11456` in a 40-step window. That is
 correct physics, not a bug: the rarefaction behind an outgoing spherical wave
 pulls the pressure below ambient and draws gas back in through faces configured
-as outflows. The kernel detects it and switches to the ambient-pressure closure,
-which keeps the interior composition and tangential velocity so a grazing flow
-is not arrested — and the run is stable through it. Before this case, that path
+as outflows. Under the unified reversal closure (no dedicated branch:
+counted, then the same restoring relaxation as forward flow with the
+material slopes upwinded off — `Docs/NSCBC-reversal-branch-defect.md`,
+driver gate C13) the run is stable through it. Before this case, that path
 had only ever been exercised by a synthetic state in check C6.
 
 **It also caps the benefit.** For cells in reversal the boundary is effectively a
@@ -162,3 +163,49 @@ is to give that face an inflow target rather than to expect the outflow model to
 cope. The residual number is also not purely boundary error in this case: the
 imploding half of the split pulse passes through the origin and is still in the
 box at the final time.
+
+## Duct mode — the PeleC half of driver t3/t5 (`nscbc-acoustic-duct.inp`)
+
+```sh
+./PeleC2d.<comp>.ex nscbc-acoustic-duct.inp \
+    pelec.bc_nscbc_relax_u=<K> prob.force_freq=<f> \
+    stop_time=<6 t_a + 4/f> amr.plot_per=<1/(24 f)>
+./duct_metrics.py <rundir> --freq <f>
+```
+
+`pulse_type = 2`: a uniform stream enters through a characteristic INFLOW at
+x-lo whose velocity target carries a harmonic forcing (the `time` argument of
+`bcnormal_nscbc`, finally consumed), and x-hi falls back to the case's
+hard-pressure `bcnormal` — the fully reflecting far end. This is the same
+duct as the driver's `t1`/`t3`/`t5` modes (`Verification/NSCBC1D/README.md`:
+what the value-relaxation inlet does to injected signals), solved by PeleC's
+Godunov machinery instead of the mini solver. The banner prints the
+Doppler-corrected quarter-wave `f0` (865.1 Hz here); the matrix is relax_u ∈
+{0, 0.5, 2, 5} × f ∈ {0.8, 1.0, 1.2} f0. `duct_metrics.py` linearly detrends
+the inlet series before projecting — with relax_u small the mean is weakly
+anchored, and its wander otherwise leaks into a finite-window Fourier
+projection as a spurious amplitude (measured: the leak read as I_u up to 0.73
+before detrending, on runs whose P_RMS field is zero).
+
+Measured I_u (achieved u′ amplitude at the inlet over the target amplitude),
+PeleC against driver:
+
+| relax_u | f/f0 | PeleC | driver |
+|---|---|---|---|
+| 0 | 0.8 / 1.0 / 1.2 | 0.000 / 0.000 / 0.000 | 0.011 / 0.013 / 0.016 |
+| 0.5 | 0.8 / 1.0 / 1.2 | 0.135 / 0.001 / 0.073 | 0.137 / 0.013 / 0.073 |
+| 2 | 0.8 / 1.0 / 1.2 | 0.912 / 0.008 / 0.241 | 0.949 / 0.010 / 0.244 |
+| 5 | 0.8 / 1.0 / 1.2 | 2.722 / 0.141 / 0.441 | 2.709 / 0.146 / 0.455 |
+
+And the t5 antinode amplitudes at relax_u = 2: P_RMS = 2823.5 / 1264.3 /
+813.4 dyn/cm² against the driver's 2819.4 / 1260.5 / 812.5 — 0.1–0.3%
+agreement, with the standing-wave envelope correlation at 1.000 in every
+forced run. Two independent solvers and two independent implementations of
+the surrounding machinery agree to 1–4% on the deterioration index (several
+entries to the third digit) and to a few tenths of a percent on the
+standing-wave amplitudes. Every driver conclusion survives the plumbing:
+relax_u = 0 injects nothing, off-resonance injection is monotone in relax_u
+but faithful nowhere (2.7× overshoot at relax_u = 5), and on resonance the
+injection collapses at any stiffness because a velocity relaxation cannot
+drive the velocity node it is aimed at. The deterioration is a property of
+the formulation, not of either code.
