@@ -74,17 +74,21 @@ the inverted sign and are superseded below):
 | outflow | σ | β | β_s | H₂ | CH₄ | ratio |
 |---|---|---|---|---|---|---|
 | hard `p = p_amb` | — | — | — | −507 | −776 | 1.53 |
-| characteristic | 1 | 1 | 1 | +1714 | +2932 | **1.71** |
-| characteristic | 1 | 0.5 | 1 | +1359 | +2136 | **1.57** |
+| characteristic | 1 | 1 | 1 | +1917 | +3254 | **1.70** |
+| characteristic | 1 | 0.5 | 1 | +1572 | +2428 | **1.54** |
 
-**1.64 measured against 1.82 predicted**, with no fitted quantity — the
+**1.62 measured against 1.82 predicted**, with no fitted quantity — the
 prediction is from the flame's expansion ratio and thickness alone. These
 β_s = 1 rows are failure-mode configurations whose piled-up structure
-transiently reverses the boundary, so they shifted a few percent when the
-hard reversal pin became the soft σ-rated closure; the pre-fix CH₄
-β = 0.5 value (+2253) had been reproduced to the digit (+2253.3) across a
-different machine, toolchain and build system, so the shift is the closure,
-not the environment.
+reverses the boundary (in the H₂ sitting case, run with counters on, the
+ENTIRE outflow face is in reversal essentially every fill), so their
+absolute values have moved with each generation of the reversal closure —
+pin, soft, and now the C13-gated unified closure
+(`Docs/NSCBC-reversal-branch-defect.md`) — while the H₂/CH₄ RATIO, which is
+the check, has stayed within 2%: 1.65 (pin), 1.64 (soft), 1.62 (unified).
+The pre-fix CH₄ β = 0.5 value (+2253) had been reproduced to the digit
+(+2253.3) across a different machine, toolchain and build system, so the
+shifts are the closure, not the environment.
 
 ## What it says about β_s, more strongly than the H₂ case did
 
@@ -97,17 +101,19 @@ reference:
 
 | configuration | CH₄ |
 |---|---|
-| β_s = 1 (source off) | +2136 |
-| β_s = 0 (source on) | **+766** |
-| β_s = 0 + `extrap_temperature` | **−547** |
+| β_s = 1 (source off) | +2428 |
+| β_s = 0 (source on) | **+919** |
+| β_s = 0 + `extrap_temperature` | **−546.8** |
 | hard `p = p_amb` | −776 |
 
-Turning the corrected source on cuts the error 2.8× (the H₂ case measures
+Turning the corrected source on cuts the error 2.6× (the H₂ case measures
 2.0×), and the closure pair — the ghosts carrying the diffusive dp/dt, the
 incoming wave carrying the chemical one — lands at the hard-outflow level,
-exactly as in the parent case. The stronger the heat release, the more the
-term is worth, which is what a correctly-signed Sutherland–Kennedy
-cancellation must do.
+exactly as in the parent case; the recipe row reproduces the soft-closure
+era's −546.8 to the digit (it never reverses, and forward-flow fills are
+bit-identical across the closure change). The stronger the heat release,
+the more the term is worth, which is what a correctly-signed
+Sutherland–Kennedy cancellation must do.
 
 `β = 0.5` is worth more in CH₄ than in H₂ — 20% against 10% — which is
 consistent: the stronger dilatation makes the tangential structure at the

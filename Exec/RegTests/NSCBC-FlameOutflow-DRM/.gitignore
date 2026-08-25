@@ -8,4 +8,3 @@ d*_bs*/
 Backtrace.*
 *.log
 __pycache__/
-*-traces.csv

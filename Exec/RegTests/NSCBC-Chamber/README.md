@@ -77,19 +77,47 @@ is the point.
 
 ## Status
 
-Built, smoke-tested, and already earning its keep: the first production vent
-run crashed at t = 4.08 ms, and the forensics (NaN localised to the vent
-plane, backflow of −144 → −2628 cm/s over the preceding 45 steps) exposed a
-real kernel defect — the outflow-reversal branch answered transient backflow
-by *pinning* the ghost pressure to ambient, and the pressure discontinuity
-that pin creates under a hard reversal fed NaNs. This is exactly the state a
-chamber ring-down produces (the vent breathes) and none of the smaller cases
-sustains. The closure is now a soft σ-rated relaxation, continuous through
-u = 0; with it the vent variant completes the full 8 ms with the ring-down
-resolved (buildup peak ≈ +1300 dyn/cm² at 0.9 ms, V̇_vent settling to
-≈ 71 cm²/s). Every previously-completing table row in the suite reproduces
-to the digit under the new closure — see the FlameOutflow READMEs. The full
-two-variant production comparison and its table still belong to whoever runs
-Phase 4 in earnest; regenerate BOTH variants with a post-fix executable so
-the A/B compares like with like. Not registered in `Tests/CMakeLists.txt`:
-at ~1 CPU-hour per variant it is an application capstone, not a CI gate.
+Production-complete, and the case has now killed THREE defective reversal
+closures on its way here — it is the only configuration in the suite whose
+boundary genuinely reverses (the vent breathes), so it finds what nothing
+else can. The history, in order: the original hard ambient pin NaN'd the
+first production run at 4.08 ms (backflow −144 → −2628 cm/s, a 138 K cell);
+the soft pressure-only replacement survived but manufactured a spurious
+0.32 atm chamber spike at 4.0–4.6 ms by drawing inflow against a
++0.3 atm adverse gradient (dropped `S_p`/`dR₊`/`T_in`, frozen ghost
+velocity); and the first unification of the closure NaN'd again at 4.05 ms
+by extrapolating material content into the backflow (the cold runaway,
+385 → 89 K in 42 µs). Full forensics:
+`Docs/NSCBC-reversal-branch-defect.md`; static gate: driver C13 a/b/c. The
+shipped closure — unified acoustics, `w_mat`-upwinded material slopes —
+completes all three variants to 8 ms.
+
+The T7 comparison, measured with `chamber_qoi.py` on the 2026-08-25
+production set (identical boundary settings, placement the only difference):
+
+| variant | V̇ plateau [cm²/s] | end-of-burn peak [dyn/cm²] | f_ring [kHz] | decay λ [1/s] |
+|---|---|---|---|---|
+| vent, σ = 0.25 | 72.2 | **+37,473** | 3.33 | 674 |
+| vent, σ = 16 | 71.6 | **+6,875** | 14.16 | 504 |
+| plenum (same window) | 72.1 | +1,951 | 0.51 | 184 |
+
+Three phases, three answers. **Buildup**: placement costs nothing — both
+variants drive identical venting (V̇ 72.2 vs 72.1 cm²/s); the plenum's
+standing +~3×10³ dyn/cm² offset is the inertia of the 2.4 cm duct column it
+pushes, physics any boundary would see. **End of burn** (t ≈ 4.0–4.6 ms):
+the last ~3% of charge burns while the vent flow chokes — a real
+constant-volume pressurisation — and how much of it the boundary lets
+through is where placement bites: +37k at σ = 0.25 against the plenum's
++2k, halved and halved again by σ = 16. This is the honest remaining
+boundary cost, down 8.5× from the defective closure's 321k, and with NO
+counter-gradient inflow (V̇ dips to −9 cm²/s where the defective closure
+drew −374 against the gradient). **Ring-down** is where σ is directly
+legible: at σ = 0.25 the "mode" is the relaxation itself
+(3.33 kHz ≈ K/2π = σc/2πL), while σ = 16 stiffens the end toward a real
+acoustic termination and the chamber rings near its burnt-gas quarter-wave
+(14.2 measured vs ~18.8 kHz ideal) — the Lesson-9 punchline, measured. The
+σ = 16 run also takes brief genuine backflow breaths (V̇ to −110 cm²/s)
+through the fixed closure without incident.
+
+Not registered in `Tests/CMakeLists.txt`: at ~1 CPU-hour per variant it is
+an application capstone, not a CI gate.

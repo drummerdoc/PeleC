@@ -1069,7 +1069,8 @@ check_fallbacks()
   }
   check(
     finite && diag[pc_nscbc::Diag::reversed] == 1 && sg[URHO] > 0.0,
-    "reversed flow at outflow -> ambient closure", "counted, state finite");
+    "reversed flow at outflow -> counted, standard closure",
+    "counted, state finite (continuity and relaxation gated by C13)");
 
   // EB body state in the stencil
   Real body[NVAR];
@@ -1095,6 +1096,169 @@ check_fallbacks()
     finite = finite && std::isfinite(sg[v]);
   }
   check(finite, "covered boundary cell -> finite fallback", "state finite");
+}
+
+// C13: the outflow closure must be CONTINUOUS through u_out = 0, and a
+//      transient reversal must still be RELAXED -- the ghost normal velocity
+//      has to respond outward when the interior is over-pressured, because
+//      that response is the only feedback resisting counter-gradient inflow.
+//
+//      This is the NSCBC-Chamber defect gate
+//      (Docs/NSCBC-reversal-branch-defect.md): the dedicated reversal branch
+//      produced a ghost state that dropped dR+, S_p and T_in relative to the
+//      forward branch -- an O(1) discontinuity at u_out = 0 exactly where a
+//      flame finishes its transit -- and froze the ghost velocity, so a
+//      breathing vent saw no restoring push.  The production A/B showed the
+//      flow dithering across the branch boundary with growing amplitude
+//      (-185 -> -962 cm/s in 0.25 ms) and a spurious 0.3 atm chamber spike.
+//
+//      (a) sweeps the interior normal velocity through zero over a flame-like
+//      graded stencil (live dR+, and in reacting builds live S_p via
+//      beta_s = 0) and asserts the crossing jump in ghost p and ghost u_out
+//      is no outlier against the sweep's own smooth variation.
+//      (b) holds a uniform over-pressured reversed state and asserts the
+//      ghost pressure moves toward the target AND the ghost normal velocity
+//      moves outward from the interior's -- a frozen ghost velocity fails.
+void
+check_reversal_continuity()
+{
+  Case cs;
+  auto eos = pele::physics::PhysicsType::eos();
+  const Real dx = cs.L / cs.n;
+  pc_nscbc::Params prm;
+  prm.L_ref = cs.L;
+  prm.sigma = 0.25;
+  prm.beta_s = 0.0; // the flame-crossing recipe: the reaction source is live
+  pc_nscbc::Target out;
+  out.type = pc_nscbc::Type::outflow;
+  out.p = cs.p0;
+
+  // A flame-like face: hot boundary cell, mild inward T and u gradients, 8%
+  // overpressure so the relaxation has a defined restoring direction.
+  Real Y[NUM_SPECIES] = {0.0};
+#if NUM_REACTIONS == 0
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+#else
+  Y[H2_ID] = 0.0285;
+  Y[O2_ID] = 0.2265;
+  Y[N2_ID] = 0.7450;
+#endif
+  const Real T_face = 1400.0;
+  const Real p_in = 1.08 * cs.p0;
+  const Real du = 500.0; // cm/s of normal-velocity gradient per cell
+
+  // hi face: sgn = -1, so u_out = +u and positive u is outflow.
+  auto fill = [&](Real u_face, bool graded, Real* sg) {
+    Real sN[NVAR], sNm1[NVAR], sNm2[NVAR];
+    const Real gT = graded ? 150.0 : 0.0;
+    const Real gu = graded ? du : 0.0;
+    Real rho = 0.0, e = 0.0;
+    eos.PYT2RE(p_in, Y, T_face, rho, e);
+    set_state(sN, rho, u_face, T_face, Y);
+    eos.PYT2RE(p_in, Y, T_face - gT, rho, e);
+    set_state(sNm1, rho, u_face - gu, T_face - gT, Y);
+    eos.PYT2RE(p_in, Y, T_face - 2.0 * gT, rho, e);
+    set_state(sNm2, rho, u_face - 2.0 * gu, T_face - 2.0 * gT, Y);
+    pc_nscbc::apply(sN, sNm1, sNm2, 3, dx, 0, -1, 1, out, prm, sg, nullptr);
+  };
+
+  // (a) the sweep.  10 cm/s steps across [-1200, 1200] cm/s -- fine enough to
+  // resolve the material-upwinding band below u_out = 0 -- and the crossing
+  // pair's jump in ghost p, u AND T must sit inside the sweep's own
+  // variation, not an order above it.
+  const int ns = 241;
+  const Real u_lo = -1200.0, u_hi = 1200.0;
+  std::vector<Real> pg(ns), ug(ns), tg(ns), uu(ns);
+  for (int i = 0; i < ns; i++) {
+    uu[i] = u_lo + (u_hi - u_lo) * static_cast<Real>(i) / (ns - 1);
+    Real sg[NVAR];
+    fill(uu[i], true, sg);
+    const pc_nscbc::CellPrim qg = pc_nscbc::cell_primitives(sg);
+    pg[i] = qg.p;
+    ug[i] = qg.u[0]; // n_sgn = +1 on the hi face
+    tg[i] = qg.T;
+  }
+  Real jp_cross = 0.0, ju_cross = 0.0, jt_cross = 0.0;
+  Real jp_other = 0.0, ju_other = 0.0, jt_other = 0.0;
+  for (int i = 0; i + 1 < ns; i++) {
+    const Real jp = std::abs(pg[i + 1] - pg[i]);
+    const Real ju = std::abs(ug[i + 1] - ug[i]);
+    const Real jt = std::abs(tg[i + 1] - tg[i]);
+    const bool crossing = (uu[i] < 0.0) && (uu[i + 1] >= 0.0);
+    if (crossing) {
+      jp_cross = jp;
+      ju_cross = ju;
+      jt_cross = jt;
+    } else {
+      jp_other = std::max(jp_other, jp);
+      ju_other = std::max(ju_other, ju);
+      jt_other = std::max(jt_other, jt);
+    }
+  }
+  char buf[220];
+  std::snprintf(
+    buf, sizeof(buf),
+    "crossing jump: p %.3e (<= %.3e elsewhere), u %.3e (<= %.3e), "
+    "T %.3e (<= %.3e)",
+    jp_cross, jp_other, ju_cross, ju_other, jt_cross, jt_other);
+  check(
+    (jp_cross <= 3.0 * jp_other + 1.0e-9 * cs.p0) &&
+      (ju_cross <= 3.0 * ju_other + 1.0e-9 * 1.0e5) &&
+      (jt_cross <= 3.0 * jt_other + 1.0e-6 * cs.T0),
+    "ghost state is continuous through u_out = 0", buf);
+
+  // (b) reversal is still relaxed.  Uniform over-pressured stencil, firmly
+  // reversed: no extrapolation content, so the only ghost response is the
+  // incoming-wave relaxation, and it must move p toward the target and u_out
+  // outward.  A ghost velocity frozen at the interior's value is exactly the
+  // no-feedback closure that let the chamber runaway feed.
+  {
+    const Real u_rev = -600.0;
+    Real sg[NVAR], sN[NVAR];
+    Real rho = 0.0, e = 0.0;
+    eos.PYT2RE(p_in, Y, T_face, rho, e);
+    set_state(sN, rho, u_rev, T_face, Y);
+    fill(u_rev, false, sg);
+    const pc_nscbc::CellPrim qN = pc_nscbc::cell_primitives(sN);
+    const pc_nscbc::CellPrim qg = pc_nscbc::cell_primitives(sg);
+    std::snprintf(
+      buf, sizeof(buf), "ghost du_out = %+.4e cm/s, ghost dp = %+.4e dyn/cm^2",
+      qg.u[0] - qN.u[0], qg.p - qN.p);
+    check(
+      (qg.u[0] > qN.u[0] + 1.0e-10 * qN.c) && (qg.p < qN.p),
+      "over-pressured reversal relaxes p AND pushes u_out outward", buf);
+  }
+
+  // (c) reversal must NOT extrapolate material content.  The stencil here is
+  // the chamber's fatal configuration: temperature falling TOWARD the face
+  // (cold gas at the boundary).  Under firm backflow an extrapolated ghost T
+  // continues that ramp downward, the inflow advects the colder ghost gas
+  // back in, and the loop refrigerates the boundary cell to cryogenic
+  // temperatures while 1/(rho c) amplifies the relaxation -- the production
+  // vent run went 385 -> 241 -> 89 K in 42 us and NaN'd.  The ghost
+  // temperature under firm reversal must be the interior cell's own.
+  {
+    const Real u_rev = -600.0;
+    Real sN[NVAR], sNm1[NVAR], sNm2[NVAR], sg[NVAR];
+    Real rho = 0.0, e = 0.0;
+    const Real T_cold = 400.0; // face cell, coldest; T RISES inward
+    eos.PYT2RE(p_in, Y, T_cold, rho, e);
+    set_state(sN, rho, u_rev, T_cold, Y);
+    eos.PYT2RE(p_in, Y, T_cold + 300.0, rho, e);
+    set_state(sNm1, rho, u_rev, T_cold + 300.0, Y);
+    eos.PYT2RE(p_in, Y, T_cold + 600.0, rho, e);
+    set_state(sNm2, rho, u_rev, T_cold + 600.0, Y);
+    pc_nscbc::apply(sN, sNm1, sNm2, 3, dx, 0, -1, 1, out, prm, sg, nullptr);
+    const pc_nscbc::CellPrim qN = pc_nscbc::cell_primitives(sN);
+    const pc_nscbc::CellPrim qg = pc_nscbc::cell_primitives(sg);
+    std::snprintf(
+      buf, sizeof(buf), "ghost T = %.2f K vs interior %.2f K", qg.T, qN.T);
+    check(
+      std::abs(qg.T - qN.T) < 1.0e-3 * qN.T,
+      "firm reversal freezes material: ghost T is the interior's", buf);
+  }
 }
 
 // C8: does the ghost carry a sensible TEMPERATURE gradient?
@@ -2712,6 +2876,8 @@ main(int argc, char* argv[])
 #endif
     std::printf("\nC6  fallbacks\n");
     check_fallbacks();
+    std::printf("\nC13 outflow reversal: continuity and relaxation\n");
+    check_reversal_continuity();
     std::printf("\nC7  reaction source term\n");
     check_reaction_source();
     std::printf("\nC8  diffusive behaviour of the ghost\n");

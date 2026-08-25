@@ -17,8 +17,10 @@ full reasoning — the commit messages are the lab notebook.
   `PELE_PHYSICS_HOME=` on every make line (PeleC's own submodule is uninitialised; SUNDIALS is
   prebuilt under that tree's `ThirdParty/INSTALL`, no `make TPL` needed). `COMP=llvm`.
 * The 1-D driver builds in seconds; a 2-D case exe in ~5 min; the flame matrices run in
-  minutes to ~2 h. Run sims in the background and poll. `rm -rf tmp_build_dir *.ex` before
-  switching `Chemistry_Model` — make will not notice on its own.
+  minutes to ~2 h. Run sims in the background and poll. `make realclean COMP=llvm` before
+  rebuilding the driver after a `Chemistry_Model` switch OR a kernel edit — make will not
+  notice either on its own (the exe target has no prerequisites), and realclean without
+  `COMP=` cleans the wrong suffix and silently does nothing.
 * `prob.pmf_datafile` is CWD-relative: always pass an absolute path.
 
 ## State (all measured; do not relitigate without new data)
@@ -36,19 +38,25 @@ full reasoning — the commit messages are the lab notebook.
 * `extrap_material` is for fronts that SIT, never during a transit.
 * Determinism (decomposition, MPI, restart) is bit-identical and must stay so; the fill is a
   pure function of the interior state — no boundary history.
-* Outflow reversal (transient backflow through an outflow) uses a soft σ-rated pressure
-  relaxation in the ghosts, continuous through u = 0 — NOT a pin to ambient. The old hard pin
-  NaN'd the first NSCBC-Chamber production run at 4.08 ms (vent breathing during ring-down)
-  and was the cause of both old NaN rows in the flame-exit table. Every previously-completing
-  table row in the suite reproduces to the digit under the new closure (healthy runs never
-  reverse); only failure-mode rows shifted, and all READMEs carry post-fix numbers. A
-  sustained-recirculation gate for this branch is still queue item 2.
+* Outflow reversal runs through the SAME closure as forward outflow (unified acoustics,
+  restoring in p and u, `S_p`/`T_in` live) with the λ₀ material slopes upwinded off
+  (`w_mat`) — no dedicated branch. Three dedicated branches died before this: the ambient
+  pin (NaN via pressure step), the soft pressure-only relaxation (spurious 0.32 atm chamber
+  spike via dropped terms + frozen ghost velocity), and unified-without-upwinding (cold
+  runaway NaN via self-fed material extrapolation). Gate: driver C13 a/b/c; forensics in
+  `Docs/NSCBC-reversal-branch-defect.md`. Forward-flow histories are bit-identical (recipe
+  rows reproduce to the digit); failure-mode rows re-measured +14–22% honest. Treating
+  SUSTAINED recirculation as local inflow with a target state is still queue item 2, but
+  note the reversal counters are silent unless `pelec.sum_interval` is set.
 * C11x (driver, reported not gated): profile-fit ghost closure (fitU + source-consistency
   bound) reaches ~oracle level on a sustained front, releases unsustainable structure, robust
   to 15% end-state and full shape distortion of the family. 2-3D candidate; open items in
   `Verification/NSCBC1D/README.md`.
-* Driver: air 53/53, LiDryer 57/57, PELE_NUM_ADV=2 57/57, SRK 40/40 (statics; dynamics
-  skipped by design). CI job `NSCBC-Driver` runs all four; GNUmake takes `PELE_EOS=SRK`.
+* Driver: air 56/56, LiDryer 60/60, SRK 43/43 (statics; dynamics skipped by design);
+  PELE_NUM_ADV=2 expected 56 (CI). CI job `NSCBC-Driver` runs all four; GNUmake takes
+  `PELE_EOS=SRK`. C13 (reversal continuity/relaxation/material-freeze) is static and runs
+  in all builds. The driver GNUmake needs `make realclean COMP=llvm` before rebuilds —
+  it will NOT notice kernel edits or mechanism switches on its own.
 * Static GPU audit of the branch code is clean (commit e6a8ad9): device paths, captures,
   counters, and every synchronize reviewed. The actual device build remains item 5.
 
@@ -60,6 +68,26 @@ full reasoning — the commit messages are the lab notebook.
   claude.ai artifact: https://claude.ai/code/artifact/4d4f11af-7932-4c80-95f7-cf9bd90b984a
 * Untracked `PAPERS/` at the repo root is Marc's reference library — expected, leave it.
 
+## Resolved 2026-08-25: the reversal closure is now unified and gated
+
+The chamber production A/B found the `b764cfb` reversal branch dropping
+`S_p`/`dR₊`/`T_in` (spurious 0.32 atm spike at the flame-vent crossing), and
+the first fix attempt exposed a second defect (extrapolated material content
+advected back in during backflow — the cold runaway, 385 → 89 K, NaN; the
+original pin's own failure mode). Final closure in `Source/NSCBC.H`: ONE
+outflow closure both sides of `u_out = 0` (unified acoustics — restoring in
+both p and u, `S_p`/`T_in`/`dRm` always live), with the λ₀ material SLOPES
+upwinded off during reversal (`w_mat`: 1 for `u_out ≥ 0` so every
+forward-flow history is bit-identical — recipe rows reproduce to the digit,
+measured; 0 under firm reversal; 10⁻³c continuity band). Gate: driver C13
+a/b/c, static, red-measured against both defective closures. Full story:
+`Docs/NSCBC-reversal-branch-defect.md`. Fallout re-measured: the
+failure-mode rows in FlameOutflow/DRM READMEs shifted +14–22% (the old
+branch was bleeding pressure through reversals it manufactured itself —
+counters now show e.g. the σ=1/eT=0/β_s=1 sitting row holds its ENTIRE face
+in reversal, which is why those rows were closure-sensitive); recipe rows
+unchanged to the digit; chamber table regenerated (README).
+
 ## Work queue
 
 1. **T5 + T3** — injection-fidelity tests (harmonic inlet forcing vs analytic standing-wave
@@ -67,14 +95,12 @@ full reasoning — the commit messages are the lab notebook.
    signals. Driver first (add the sigma-from-CLI + T1/T3/T5 duct modes together), PeleC after.
 2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
    wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
-3. **T7 mini-SydGex** — BUILT as `Exec/RegTests/NSCBC-Chamber` (Lesson 9 is runnable).
-   Marc's first vent production run found the reversal-pin defect (fixed; see State) and
-   its data is discarded; BOTH variants are to be regenerated with a post-fix executable
-   (2026-08-24). When those plotfiles come back: process with `chamber_metrics.py`
-   (`--xvent 1.2`), build the peak-aligned trace difference / V̇ balance / ring-down
-   table into the case README's Status section, and consider the σ = 16 ring-down
-   variant the README names. Follow-ups: laterally-expanding plenum and the baffle
-   (both need EB).
+3. **T7 mini-SydGex** — DONE (2026-08-25). Three-variant production set (vent, plenum,
+   vent-σ16) completed with the final kernel; T7 table and phase-resolved analysis are in
+   the case README's Status section; `chamber_qoi.py` (beside `chamber_metrics.py`) is the
+   measurement script. The case's production runs killed three defective reversal closures
+   along the way. Remaining follow-ups: laterally-expanding plenum and the baffle (both
+   need EB).
 4. **Boundary registers** (design note before code): per-face EMA/integrated registers,
    checkpointed, updated once per advance outside the fill. NDNR motivation at outlets is
    WEAKENED by the flame-closure results; strongest remaining cases are inlets (NRI) and

@@ -18,6 +18,10 @@ Owner: Marc. Repo at `/Users/marcusd/src/PeleC`, fork `origin` = drummerdoc/Pele
 ## Decisions settled by measurement — do not relitigate without new data
 
 - Ghost-cell architecture stays; flux-form reformulation rejected (GC bias is ~5 % of the error).
+- NO dedicated outflow-reversal branch: one closure both sides of u_out = 0 (unified
+  acoustics, w_mat-upwinded material slopes). Three dedicated branches each failed in
+  production (pin: NaN; soft: spurious 0.32 atm spike; naive unification: cold-runaway NaN).
+  Gate: driver C13; forensics: `Docs/NSCBC-reversal-branch-defect.md`.
 - `extrap_temperature` is the correct ghost closure for the diffusion operator (C8, C12).
 - `extrap_material` is for fronts that SIT, never during a transit.
 - Determinism (decomposition, MPI, restart) is bit-identical and must stay so.

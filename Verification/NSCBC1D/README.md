@@ -25,16 +25,16 @@ to exercise check C7, which is skipped otherwise:
 
 ```sh
 cmake -S . -B build_lidryer -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer
-cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 57/57 (air: 53/53)
+cmake --build build_lidryer && ./build_lidryer/nscbc1d      # 60/60 (air: 56/56)
 ```
 
 Two further build axes, both run in CI (the `NSCBC-Driver` job):
 
 ```sh
-cmake -S . -B build_adv -DAMReX_DIR=... -DPELE_NUM_ADV=2    # 53/53: pack_ghost's
+cmake -S . -B build_adv -DAMReX_DIR=... -DPELE_NUM_ADV=2    # 56/56: pack_ghost's
 cmake --build build_adv && ./build_adv/nscbc1d              # passive-scalar path
 cmake -S . -B build_srk -DAMReX_DIR=... -DPELE_MECHANISM=LiDryer -DPELE_EOS=SRK
-cmake --build build_srk && ./build_srk/nscbc1d              # 40/40 static checks
+cmake --build build_srk && ./build_srk/nscbc1d              # 43/43 static checks
 ```
 
 The SRK build is the EOS-portability claim made checkable: the kernel keeps
@@ -78,6 +78,7 @@ relationships rather than on hard-coded numbers.
 | **C10** | The source-free ramp: mass/momentum-consistent, no sustainer. Its own negative result — a source-free expansion cannot persist in a duct — plus a reported row showing `extrap_material` holds a *decaying* ramp alive at the face, which is its known cost | Nothing; the gated content moved to C11 |
 | **C11** | The sustained ramp: C10's structure plus the manufactured energy source `S_E = ṁ dH/dx` that makes it an exact steady solution straddling the outflow — a flame's mechanical structure minus the chemistry. An *oracle* ghost fill (exact continuation) holds it, so the architecture is sound; the entropy closure drifts 15707 dyn/cm² in 0.7 relaxation times and distorts the face `du/dn` to 175% of exact; `extrap_material` holds those to 3175 and 80%, and cuts the static face-flux error 3.3× | The material-slope continuation is broken, or the late-time columns are being read without their caveat: the frozen source cannot follow a structure the boundary lets slip, so late-time drift is the MMS's artefact, not the boundary's |
 | **C12** | With real conduction in the mini solver and a hot flank in the outflow cells, against a shielded reference: the entropy closure leaks 887 dyn/cm² of boundary error, `extrap_temperature` holds it to 104 | The diffusive boundary physics lives in the ghost **T closure**, not in the wave model — an amplitude-side diffusion source term was built, verified exact on quadratic profiles, measured to double-count (104 → −911 here; +1200 → +1771 in PeleC), and removed |
+| **C13** | (a) The outflow closure is a *continuous* function of the interior normal velocity through `u_out = 0` — a swept flame-like stencil shows no outlier jump in ghost p, u or T at the crossing; (b) an over-pressured transient reversal still relaxes: ghost p toward target AND ghost `u_out` pushed outward; (c) a firm reversal does NOT extrapolate material content: with T falling toward the face, the ghost keeps the interior's own T | The reversal handling has drifted from either of its two proven properties. The 2026-08 NSCBC-Chamber production A/B (`Docs/NSCBC-reversal-branch-defect.md`) caught both failure modes in sequence: a dedicated reversal branch that dropped `dR₊`, `S_p` and `T_in` and froze the ghost velocity put a 4.2e3 dyn/cm² step at `u_out = 0` (vs 1.2e-2 sweep variation, fails a/b) and fed a growing dither and a spurious 0.3 atm spike; unifying the closure *without* upwinding the material slopes (fails c, ghost T 341.5 vs 400 K) instead fed the cold runaway — extrapolated outward-cooling ghosts advected back in, 385 → 89 K in 42 µs, NaN. The shipped closure passes all three: unified acoustics, `w_mat`-upwinded material slopes |
 
 C4 also measures the **inflow** reflection curve: R = 2.3% / 4.8% / 19% / 57% at `relax_u` = 0.5 / 2 / 10 / 50 — soft inlets swallow acoustics, stiff ones are walls; the default reflects under 5%. And the kernel now carries a **transit guard**: an advisory counter (`material structure`) that fires when |dS| > 5% of ρ per cell sits in an outflow boundary cell — the configuration whose crossing the σ = 0.25 default does not survive.
 

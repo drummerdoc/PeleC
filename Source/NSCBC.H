@@ -274,13 +274,6 @@ finite_or(const amrex::Real x, const amrex::Real fallback) noexcept
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
-one_m_M2_rev(const amrex::Real mach) noexcept
-{
-  return amrex::max<amrex::Real>(
-    1.0 - mach * mach, constants::very_small_num());
-}
-
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE amrex::Real
 minmod(const amrex::Real a, const amrex::Real b) noexcept
 {
   if (a * b <= 0.0) {
@@ -602,39 +595,25 @@ apply(
   // ---- 3. Direction sanity ----------------------------------------------
   const bool outflow_face = (tgt.type == Type::outflow);
   if (outflow_face && (u_out_N < 0.0)) {
-    // Transient reversal at an outflow: keep the interior state and RELAX the
-    // ghost pressure toward the target at the boundary's own rate -- the same
-    // increment form as the outflow branch, so the closure is continuous
-    // through u_out = 0 and sigma controls reversal stiffness like everything
-    // else.  A hard pin of tgt.p here (the original closure) is a step
-    // discontinuity of the full overpressure at every reversal, and a
-    // ringing chamber that breathes through its vent turns that into a
-    // runaway: backflow -144 -> -2628 cm/s in 45 steps, a 138 K cell, NaN
-    // (found by NSCBC-Chamber; the plenum variant, whose boundary sits in
-    // quiet duct, was untouched).
+    // Transient reversal at an outflow: COUNTED, but no longer a separate
+    // closure.  The acoustic side of the standard outflow path is well
+    // defined and restoring for u_out < 0 (lambda_in = c - u_out grows,
+    // 1 - M^2 is even in M, K (p - p_tgt) pulls the ghost pressure toward
+    // the target AND pushes the ghost normal velocity outward), so one
+    // closure runs on both sides of u_out = 0; only the lambda_0 material
+    // SLOPES are upwinded off during reversal (see w_mat below), leaving the
+    // ghost the interior's material VALUES.  Both dedicated branches tried
+    // here were defects the chamber found: a hard pin of tgt.p is a step
+    // discontinuity that NaN'd under vent breathing (backflow -144 -> -2628
+    // cm/s in 45 steps, a 138 K cell), and the soft pressure-only relaxation
+    // that replaced it dropped dR+, S_p and T_in relative to the forward
+    // branch and froze the ghost velocity -- an O(1) discontinuity at
+    // u_out = 0 that a flame finishing its transit turned into a growing
+    // dither and a spurious 0.3 atm chamber spike
+    // (Docs/NSCBC-reversal-branch-defect.md; gates: driver C13 a/b/c).
+    // Treating SUSTAINED recirculation as a local inflow with a target
+    // state remains open (work queue item 2).
     bump(Diag::reversed);
-    const amrex::Real K_rev = prm.sigma * one_m_M2_rev(mach) * c_N / prm.L_ref;
-    amrex::Real p_g_rev =
-      qN.p - static_cast<amrex::Real>(layer) * dx_normal * K_rev *
-               (qN.p - tgt.p) / (2.0 * (c_N - u_out_N));
-    const amrex::Real p_floor_rev = amrex::max<amrex::Real>(
-      1.0e-3 * (tgt.p > 0.0 ? tgt.p : qN.p), constants::very_small_num());
-    if (!amrex::Math::isfinite(p_g_rev) || (p_g_rev < p_floor_rev)) {
-      p_g_rev = p_floor_rev;
-      bump(Diag::floored);
-    }
-    amrex::Real T_g = qN.T, e_g = 0.0;
-    eos.RYP2T(qN.rho, qN.Y, p_g_rev, T_g);
-    eos.RTY2E(qN.rho, T_g, qN.Y, e_g);
-    if (
-      !amrex::Math::isfinite(T_g) || !(T_g > 0.0) ||
-      !amrex::Math::isfinite(e_g)) {
-      bump(Diag::eos_failure);
-      copy_state(s_N, s_ghost);
-      return;
-    }
-    pack_ghost(qN.rho, qN.u, e_g, T_g, qN.Y, s_N, s_ghost);
-    return;
   }
   if (!outflow_face && (u_out_N > 0.0)) {
     // Outflow through a configured inflow would impose D+NUM_SPECIES+1
@@ -672,6 +651,24 @@ apply(
   const amrex::Real lambda_in = c_N - u_out_N; // > 0, magnitude of the speed
   const amrex::Real one_m_M2 =
     amrex::max<amrex::Real>(1.0 - mach * mach, constants::very_small_num());
+
+  // Upwinding of the lambda_0 (material) family.  Its characteristics leave
+  // the domain only for u_out > 0; during a reversal an EXTRAPOLATED
+  // material ghost is advected back in and feeds on itself.  That loop is
+  // the chamber's cold runaway: the outward-cooling T ramp refrigerates the
+  // boundary cell, the steepened ramp extrapolates colder still, and
+  // 1/(rho c) amplifies the relaxation as T falls -- 385 -> 241 -> 89 K in
+  // 42 us, then NaN (Docs/NSCBC-reversal-branch-defect.md).  So the material
+  // SLOPES are used only where their upwind justification holds: full for
+  // u_out >= 0 (every forward-flow result is untouched to the bit), ramped
+  // off across a narrow band below zero (1e-3 c -- a continuity
+  // regularisation of the fill, not a physics knob; C13 gates it), and zero
+  // under firm reversal, where the ghost keeps the interior VALUES -- which
+  // is what the surviving closure always did.
+  const amrex::Real w_mat =
+    (u_out_N >= 0.0)
+      ? 1.0
+      : amrex::max<amrex::Real>(0.0, 1.0 + u_out_N / (1.0e-3 * c_N));
 
   // Transverse contribution to the modelled incoming wave.  Additive on the
   // amplitude, which is exactly why the relaxation is written as a gradient
@@ -752,7 +749,7 @@ apply(
       const amrex::Real Rm_Nm2 = n_sgn * qNm2.u[idir] - qNm2.p / rho_c;
       const amrex::Real dRm_meas = minmod(Rm_N - Rm_Nm1, Rm_Nm1 - Rm_Nm2);
       const amrex::Real du_mat = -u_out_N * dS / (qN.rho * one_m_M2);
-      dRm = minmod(dRm_meas, du_mat * (1.0 + mach));
+      dRm = w_mat * minmod(dRm_meas, du_mat * (1.0 + mach));
       if (!amrex::Math::isfinite(dRm)) {
         dRm = 0.0;
         bump(Diag::floored);
@@ -834,15 +831,18 @@ apply(
     amrex::Real dY[NUM_SPECIES] = {0.0};
     amrex::Real dut[3] = {0.0, 0.0, 0.0};
     if (linear && qNm1.ok && qNm2.ok) {
+      // All lambda_0 slopes carry the material upwinding factor: extrapolated
+      // material content is only valid where it advects OUT (see w_mat).
       const amrex::Real S_Nm1 = qNm1.rho - qNm1.p * inv_c2;
       const amrex::Real S_Nm2 = qNm2.rho - qNm2.p * inv_c2;
-      dS = minmod(S_N - S_Nm1, S_Nm1 - S_Nm2);
+      dS = w_mat * minmod(S_N - S_Nm1, S_Nm1 - S_Nm2);
       for (int n = 0; n < NUM_SPECIES; n++) {
-        dY[n] = minmod(qN.Y[n] - qNm1.Y[n], qNm1.Y[n] - qNm2.Y[n]);
+        dY[n] = w_mat * minmod(qN.Y[n] - qNm1.Y[n], qNm1.Y[n] - qNm2.Y[n]);
       }
       for (int d = 0; d < 3; d++) {
         if (d != idir) {
-          dut[d] = minmod(qN.u[d] - qNm1.u[d], qNm1.u[d] - qNm2.u[d]);
+          dut[d] =
+            w_mat * minmod(qN.u[d] - qNm1.u[d], qNm1.u[d] - qNm2.u[d]);
         }
       }
     }
@@ -853,7 +853,7 @@ apply(
     // Temperature closure: T on the same limited slope; rho from the EOS.
     amrex::Real dT = 0.0;
     if (prm.extrap_temperature && linear && qNm1.ok && qNm2.ok) {
-      dT = minmod(qN.T - qNm1.T, qNm1.T - qNm2.T);
+      dT = w_mat * minmod(qN.T - qNm1.T, qNm1.T - qNm2.T);
     }
 
     amrex::Real Ysum = 0.0;
