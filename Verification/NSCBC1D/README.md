@@ -227,6 +227,78 @@ nothing. Its cost is that it anchors to `p_target + ρc·u_out` rather than to
 choice for an open boundary onto a large quiescent reservoir and the wrong one
 for a duct exhausting into a plenum whose true mean pressure is not `p_target`.
 
+## Duct modes — the injection-fidelity bed (`t1` / `t3` / `t5`)
+
+```sh
+./nscbc1d t1              # step-change convergence vs relax_u (Dupuy)
+./nscbc1d t3              # forced-inlet deterioration index (Daviller)
+./nscbc1d t5 [relax_u=2]  # standing-wave P_RMS(x) profiles (Daviller)
+```
+
+One duct, run only when asked: NSCBC value-relaxation inflow at the lo face,
+hard pressure ghost (FOExtrap, p pinned — fully reflecting, R ≈ −1) at the
+hi face, mean inflow 2×10³ cm/s, forcing amplitude 10⁻³ c. These are Part
+III of the design doc made runnable — the first *dynamic* measurements of
+what the value-relaxation inlet does to injected signals, against the
+Dupuy/Daviller phenomenology. Each mode carries its own relationship gates
+and exits nonzero on failure; none is part of the default suite.
+
+**t1 — step response (Dupuy Figs 5a/8a).** Inlet target stepped at t = 0
+against the reflecting far end; t_conv = last time the domain-mean velocity
+sits outside 0.1% of the step, in units of t_a = 2L/c, 40 t_a window:
+
+| relax_u | 0.1 | 0.2 | **0.3** | 0.5 | 1 | 2 | 5 | 10–100 |
+|---|---|---|---|---|---|---|---|---|
+| t_conv/t_a | 31.3 | 13.5 | **6.06** | 6.84 | 11.2 | 20.3 | 39.9 | >40 (never, in-window) |
+
+The CLR curve exactly as their DDE analysis predicts: an interior optimum
+at 0.3, drift-limited convergence below it, reflection-delayed convergence
+above, unusable by 5. Gated: interior minimum, argmin ∈ [0.1, 1].
+
+**t3 — forced-inlet deterioration (Daviller §4–5).** Harmonic target
+u^t = u₀ + A sin(2πft) at 0.8/1.0/1.2 × the duct's quarter-wave f₀
+(Doppler-corrected, 866.7 Hz here). I_u = achieved u′ amplitude at the
+boundary cell over A (1 = faithful injection); I_in = incoming-invariant
+amplitude over the ideal injector's; the stiff (velocity-Dirichlet) duct
+gain 1/|1+e^{iθ}| is the reference:
+
+| relax_u | I_u at 0.8 f₀ | I_u at f₀ | I_u at 1.2 f₀ |
+|---|---|---|---|
+| 0 | 0.011 | 0.013 | 0.016 |
+| 0.5 | 0.137 | 0.013 | 0.073 |
+| 2 | 0.949 | 0.010 | 0.244 |
+| 5 | 2.709 | 0.146 | 0.455 |
+
+Three findings, all design-doc I.3e made quantitative. **relax_u = 0
+injects nothing** (gated): the GC inflow has no amplitude slot — a
+time-varying target enters only through the relaxation, so the injection
+vanishes with the stiffness. This is the exact opposite of NRI's I ≡ 1 at
+any K. **Off-resonance injection is monotone in relax_u but not faithful
+anywhere** (gated on the monotonicity): 14% of the target at relax_u = 0.5,
+95% at 2 — and 271% at 5, overshooting, because the duct's return wave and
+the relaxation's response interfere and the closed loop has no notion of
+the difference between "target not met" and "reflection arriving".
+**On resonance the injection collapses instead of over-driving** (I_u ≈
+0.01 at every stiffness while I_in stays order-1): the quarter-wave mode
+has a velocity node at the driven end, and a velocity relaxation cannot
+impose a signal at a velocity node — the incoming wave it launches returns
+inverted and cancels it. An inlet that must both hold a mean and inject a
+signal through one relaxation coefficient does neither faithfully near a
+resonance; that is the measured cost of statelessness at the inlet, and the
+NRI/register discussion (design doc II.2, queue item 4) is the literature's
+answer to exactly this table.
+
+**t5 — standing-wave pattern (Daviller §7).** Same runs; P_RMS(x) at 17
+stations against the analytic envelope |sin(k_eff(L−x))|. Shape correlation
+is 1.000 at all three frequencies (gated off-resonance at > 0.95): nodes
+and antinodes sit exactly where the duct puts them, at every stiffness —
+the *geometry* is never the problem. The amplitudes carry t3's story:
+antinode P_RMS = 2819 / 1260 / 812 dyn/cm² at 0.8/1.0/1.2 f₀ (relax_u = 2),
+i.e. the strongest response is NEAR resonance and the weakest ON it,
+because the inlet cannot couple into the mode it is nominally driving
+hardest. (Ideal injected amplitude for scale: ρcA ≈ 1.4×10³, doubled at a
+standing-wave antinode.)
+
 ## Adding a check
 
 Checks are plain functions that call `check(bool, name, detail)`. Prefer

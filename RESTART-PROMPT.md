@@ -90,9 +90,19 @@ unchanged to the digit; chamber table regenerated (README).
 
 ## Work queue
 
-1. **T5 + T3** — injection-fidelity tests (harmonic inlet forcing vs analytic standing-wave
-   P_RMS; Daviller's deterioration index): what the value-relaxation inlet does to injected
-   signals. Driver first (add the sigma-from-CLI + T1/T3/T5 duct modes together), PeleC after.
+1. **T5 + T3** — injection fidelity: DRIVER HALF DONE (2026-08-25). `./nscbc1d t1|t3|t5`
+   duct modes (NSCBC inlet, hard-p reflecting far end), each self-gated; measured tables
+   and interpretation in `Verification/NSCBC1D/README.md`. Headlines: t1 reproduces
+   Dupuy's CLR curve (optimum relax_u = 0.3 at 6.06 t_a); t3 shows relax_u = 0 injects
+   nothing (no amplitude slot, gated), off-resonance injection monotone but unfaithful
+   (0.14/0.95/2.71 of target at relax_u 0.5/2/5), and ON-resonance injection COLLAPSES
+   (I_u ~ 0.01 at any stiffness — a velocity relaxation cannot drive a velocity node);
+   t5 puts the standing-wave geometry exactly on the analytic envelope at every
+   stiffness (correlation 1.000) with the amplitude carrying t3's coupling story.
+   REMAINING: the PeleC half — same forced duct through `bc_nscbc` in PeleC proper
+   (1-D or thin 2-D case, harmonic `bcnormal` target), confirming the driver numbers
+   survive the plumbing. The t3 table is also new ammunition for queue item 4 (NRI-style
+   registers are the literature's fix for exactly this).
 2. **Phase-1 coverage**: backflow branch as local inflow with a sustained-recirculation test;
    wall/NSCBC corner test; supersonic-inflow `Target.p` handling; counters on by default.
 3. **T7 mini-SydGex** — DONE (2026-08-25). Three-variant production set (vent, plenum,

@@ -2839,12 +2839,460 @@ check_diffusive_dynamics(const Real lam_cond)
     "resolved conduction is handled by the ghost T closure", buf);
 }
 
+// ===========================================================================
+//  Duct modes (CLI: t1 / t3 / t5) -- the injection-fidelity bed.
+//
+//  One duct, two experiments, run only when asked (not part of the default
+//  suite): an NSCBC value-relaxation INFLOW at the lo face and a hard
+//  pressure ghost at the hi face (FOExtrap with p pinned to p0 -- the fully
+//  reflecting open end, R ~ -1).
+//
+//  T1 (Dupuy 2026 Figs 5a/8a): step the inlet velocity target at t = 0 and
+//  measure the convergence time versus relax_u.  The CLR theory predicts a
+//  narrow viable band with an interior optimum near 0.3 and growth on both
+//  sides (drift below, reflection-delayed convergence above); that
+//  relationship is the gate.
+//
+//  T3 (Daviller 2019 sec. 4-5): force the inlet target harmonically,
+//  u^t = u0 + A sin(2 pi f t), at frequencies straddling the duct's
+//  quarter-wave resonance, and measure what actually enters: the achieved
+//  velocity amplitude at the boundary cell over A (I_u), and the incoming
+//  invariant's amplitude over the ideal injector's 2A (I_in).  Our inflow
+//  has no amplitude slot (design doc I.3e) -- a time-varying target rides
+//  the same relaxation that holds the mean -- so injection fidelity is
+//  relax_u- and frequency-dependent BY CONSTRUCTION, and relax_u = 0
+//  injects nothing at all.  Those two properties are the gates; the
+//  deterioration near resonance is the reported measurement, with the
+//  stiff-limit analytic response 1/|1 + e^{i theta}| (theta the Doppler-
+//  corrected round-trip phase; divergent at the quarter-wave) as the
+//  reference column.
+//
+//  T5 (Daviller 2019 sec. 7, laminar core): same runs, but the deliverable
+//  is P_RMS(x) against the analytic standing-wave envelope |sin| shape --
+//  node/antinode geometry gated by shape correlation, antinode amplitude
+//  reported.
+// ===========================================================================
+
+// FOExtrap with pressure pinned: the fully reflecting hi end of the duct.
+void
+hard_p_fill_hi(Field& f, Real p0)
+{
+  auto eos = pele::physics::PhysicsType::eos();
+  const int n = f.n;
+  const Prim q = get_prim(f.at(n - 1));
+  Real rho = 0.0, e = 0.0;
+  eos.PYT2RE(p0, q.Y, q.T, rho, e);
+  for (int layer = 1; layer <= NG; layer++) {
+    set_state(f.at(n - 1 + layer), rho, q.u, q.T, q.Y);
+  }
+}
+
+struct DuctForcedResult
+{
+  Real I_u = 0.0;  // achieved u' amplitude at the inlet cell / target A
+  Real I_in = 0.0; // incoming-invariant amplitude / ideal injector's 2A
+  std::vector<Real> prms; // P_RMS(x) per cell over the measurement window
+};
+
+// Harmonic forcing of the inflow target against the reflecting far end.
+// Settles for n_settle acoustic round trips (forcing on throughout), then
+// projects n_per integer periods.  The Fourier projection at f ignores DC,
+// so the mean-flow offset never needs subtracting.
+DuctForcedResult
+duct_forced(Real relax_u, Real freq, int n, int n_settle, int n_per)
+{
+  Case cs;
+  cs.n = n;
+  Field f(cs.n), g(cs.n), h(cs.n);
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  auto eos = pele::physics::PhysicsType::eos();
+  const Real dx = cs.L / cs.n;
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+  Prim q0{};
+  q0.rho = rho0;
+  q0.u = 0.0;
+  q0.p = cs.p0;
+  q0.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    q0.Y[k] = Y[k];
+  }
+  const Real c0 = sound_speed(q0);
+  const Real u0 = 2.0e3; // mean inflow; forcing amplitude rides well below it
+  const Real A = 1.0e-3 * c0; // ~35 cm/s: linear regime
+
+  for (int i = -NG; i < cs.n + NG; i++) {
+    set_state(f.at(i), rho0, u0, cs.T0, Y);
+  }
+
+  pc_nscbc::Params prm;
+  prm.L_ref = cs.L;
+  prm.relax_u = relax_u;
+  prm.relax_t = 0.2;
+  pc_nscbc::Target in, off;
+  in.type = pc_nscbc::Type::inflow;
+  in.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    in.Y[k] = Y[k];
+  }
+
+  const Real t_a = 2.0 * cs.L / c0;
+  const Real t_meas0 = n_settle * t_a;
+  const Real T_w = n_per / freq;
+  const Real t_end = t_meas0 + T_w;
+  const Real om = 2.0 * M_PI * freq;
+
+  DuctForcedResult r;
+  r.prms.assign(cs.n, 0.0);
+  std::vector<Real> psum(cs.n, 0.0), p2sum(cs.n, 0.0);
+  Real us = 0.0, uc = 0.0, rs = 0.0, rc = 0.0, wsum = 0.0;
+
+  Real t = 0.0;
+  while (t < t_end) {
+    Real cmax = 0.0;
+    for (int i = 0; i < cs.n; i++) {
+      const Prim q = get_prim(f.at(i));
+      cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+    }
+    Real dt = cs.cfl * dx / cmax;
+    dt = std::min(dt, t_end - t);
+    if (dt <= 0.0) {
+      break;
+    }
+    // The RK2 stages see the target at their own stage times.  The hard-p
+    // fill runs AFTER fill_bcs: the hi target is `off` there, whose
+    // zero-gradient copy would otherwise overwrite the reflecting ghost.
+    in.u[0] = u0 + A * std::sin(om * t);
+    fill_bcs(f, in, off, prm, dx);
+    hard_p_fill_hi(f, cs.p0);
+    stage(f, g, dx, dt);
+    in.u[0] = u0 + A * std::sin(om * (t + dt));
+    fill_bcs(g, in, off, prm, dx);
+    hard_p_fill_hi(g, cs.p0);
+    stage(g, h, dx, dt);
+    for (int i = 0; i < cs.n; i++) {
+      for (int v = 0; v < NVAR; v++) {
+        f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+      }
+    }
+    t += dt;
+
+    if (t > t_meas0) {
+      const Prim qb = get_prim(f.at(0));
+      const Real sn = std::sin(om * t), cn = std::cos(om * t);
+      us += qb.u * sn * dt;
+      uc += qb.u * cn * dt;
+      const Real Rin = qb.u + qb.p / (rho0 * c0); // enters through the lo face
+      rs += Rin * sn * dt;
+      rc += Rin * cn * dt;
+      wsum += dt;
+      for (int i = 0; i < cs.n; i++) {
+        const Real p = get_prim(f.at(i)).p;
+        psum[i] += p * dt;
+        p2sum[i] += p * p * dt;
+      }
+    }
+  }
+
+  const Real amp_u = 2.0 / wsum * std::sqrt(us * us + uc * uc);
+  const Real amp_R = 2.0 / wsum * std::sqrt(rs * rs + rc * rc);
+  r.I_u = amp_u / A;
+  r.I_in = amp_R / (2.0 * A);
+  for (int i = 0; i < cs.n; i++) {
+    const Real pm = psum[i] / wsum;
+    const Real var = std::max(p2sum[i] / wsum - pm * pm, 0.0);
+    r.prms[i] = std::sqrt(var);
+  }
+  return r;
+}
+
+// Doppler-corrected round-trip phase and the duct's quarter-wave frequency.
+Real
+duct_roundtrip_phase(Real freq, Real L, Real c, Real u0)
+{
+  return 2.0 * (2.0 * M_PI * freq) * L * c / (c * c - u0 * u0);
+}
+
+// T1: step the inlet target, measure convergence time vs relax_u.
+Real
+duct_step_tconv(Real relax_u, int n, Real du, Real t_end_ta)
+{
+  Case cs;
+  cs.n = n;
+  Field f(cs.n), g(cs.n), h(cs.n);
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  auto eos = pele::physics::PhysicsType::eos();
+  const Real dx = cs.L / cs.n;
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+  Prim q0{};
+  q0.rho = rho0;
+  q0.p = cs.p0;
+  q0.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    q0.Y[k] = Y[k];
+  }
+  const Real c0 = sound_speed(q0);
+  const Real t_a = 2.0 * cs.L / c0;
+
+  // Quiescent duct; at t = 0 the inlet target is already at du (the step).
+  for (int i = -NG; i < cs.n + NG; i++) {
+    set_state(f.at(i), rho0, 0.0, cs.T0, Y);
+  }
+  pc_nscbc::Params prm;
+  prm.L_ref = cs.L;
+  prm.relax_u = relax_u;
+  prm.relax_t = 0.2;
+  pc_nscbc::Target in, off;
+  in.type = pc_nscbc::Type::inflow;
+  in.u[0] = du;
+  in.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    in.Y[k] = Y[k];
+  }
+
+  const Real t_end = t_end_ta * t_a;
+  Real t = 0.0, t_last = 0.0;
+  while (t < t_end) {
+    Real cmax = 0.0;
+    for (int i = 0; i < cs.n; i++) {
+      const Prim q = get_prim(f.at(i));
+      cmax = std::max(cmax, std::abs(q.u) + sound_speed(q));
+    }
+    Real dt = cs.cfl * dx / cmax;
+    dt = std::min(dt, t_end - t);
+    if (dt <= 0.0) {
+      break;
+    }
+    fill_bcs(f, in, off, prm, dx);
+    hard_p_fill_hi(f, cs.p0);
+    stage(f, g, dx, dt);
+    fill_bcs(g, in, off, prm, dx);
+    hard_p_fill_hi(g, cs.p0);
+    stage(g, h, dx, dt);
+    for (int i = 0; i < cs.n; i++) {
+      for (int v = 0; v < NVAR; v++) {
+        f.at(i)[v] = 0.5 * (f.at(i)[v] + h.at(i)[v]);
+      }
+    }
+    t += dt;
+
+    Real ubar = 0.0;
+    for (int i = 0; i < cs.n; i++) {
+      ubar += get_prim(f.at(i)).u;
+    }
+    ubar /= cs.n;
+    if (std::abs(ubar - du) > 1.0e-3 * du) {
+      t_last = t; // still outside the band: convergence not yet held
+    }
+  }
+  return t_last / t_a;
+}
+
+void
+run_t1(int n)
+{
+  const Real ks[] = {0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 100.0};
+  const int nk = static_cast<int>(sizeof(ks) / sizeof(ks[0]));
+  std::printf(
+    "\nT1  step-change convergence vs relax_u (duct, hard-p far end, "
+    "n = %d)\n", n);
+  std::printf(
+    "    t_conv = last time |<u> - u^t| > 0.1%% of the step, in units of "
+    "t_a = 2L/c\n\n");
+  std::printf("    %8s %12s\n", "relax_u", "t_conv/t_a");
+  Real tc[nk];
+  int imin = 0;
+  for (int i = 0; i < nk; i++) {
+    tc[i] = duct_step_tconv(ks[i], n, 2.0e3, 40.0);
+    std::printf("    %8.2f %12.2f\n", ks[i], tc[i]);
+    if (tc[i] < tc[imin]) {
+      imin = i;
+    }
+  }
+  char buf[220];
+  std::snprintf(
+    buf, sizeof(buf), "argmin relax_u = %.2f, t_conv %.2f t_a (ends: %.2f, %.2f)",
+    ks[imin], tc[imin], tc[0], tc[nk - 1]);
+  check(
+    (imin > 0) && (imin < nk - 1) && (tc[0] > 1.2 * tc[imin]) &&
+      (tc[nk - 1] > 1.2 * tc[imin]),
+    "t_conv has an interior minimum (CLR band)", buf);
+  check(
+    ks[imin] >= 0.1 && ks[imin] <= 1.0,
+    "the optimum sits near the CLR prediction (~0.3)", buf);
+}
+
+void
+run_t3_t5(bool profiles, int n, Real relax_cli)
+{
+  Case cs;
+  Real Y[NUM_SPECIES];
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    Y[k] = air_Y(k);
+  }
+  auto eos = pele::physics::PhysicsType::eos();
+  Real rho0 = 0.0, e0 = 0.0;
+  eos.PYT2RE(cs.p0, Y, cs.T0, rho0, e0);
+  Prim q0{};
+  q0.rho = rho0;
+  q0.p = cs.p0;
+  q0.T = cs.T0;
+  for (int k = 0; k < NUM_SPECIES; k++) {
+    q0.Y[k] = Y[k];
+  }
+  const Real c0 = sound_speed(q0);
+  const Real u0 = 2.0e3;
+  // Quarter-wave frequency, Doppler-corrected: round-trip phase = pi.
+  const Real f0 = (c0 * c0 - u0 * u0) / (4.0 * cs.L * c0);
+  const Real fr[] = {0.8 * f0, f0, 1.2 * f0};
+
+  if (!profiles) {
+    const Real kv[] = {0.0, 0.5, 2.0, 5.0};
+    std::printf(
+      "\nT3  forced-inlet injection fidelity (duct, hard-p far end, "
+      "f0 = %.1f Hz)\n", f0);
+    std::printf(
+      "    I_u = achieved u' at the boundary cell / target amplitude "
+      "(1 = faithful);\n"
+      "    I_in = incoming-invariant amplitude / ideal injector's; its\n"
+      "    velocity-Dirichlet limit is the duct gain 1/|1+e^{i theta}| "
+      "(last column,\n    divergent at f0).\n\n");
+    std::printf(
+      "    %8s %10s %8s %8s %10s\n", "relax_u", "f/f0", "I_u", "I_in",
+      "I_in stiff");
+    Real Iu_row[4] = {0.0};
+    for (int m = 0; m < 4; m++) {
+      for (int j = 0; j < 3; j++) {
+        const DuctForcedResult r = duct_forced(kv[m], fr[j], n, 6, 4);
+        const Real th = duct_roundtrip_phase(fr[j], cs.L, c0, u0);
+        const Real stiff =
+          1.0 /
+          std::max(std::hypot(1.0 + std::cos(th), std::sin(th)), 1.0e-12);
+        if (stiff < 999.0) {
+          std::printf(
+            "    %8.2f %10.2f %8.3f %8.3f %10.2f\n", kv[m], fr[j] / f0,
+            r.I_u, r.I_in, stiff);
+        } else {
+          std::printf(
+            "    %8.2f %10.2f %8.3f %8.3f %10s\n", kv[m], fr[j] / f0, r.I_u,
+            r.I_in, "inf");
+        }
+        if (j == 0) { // off-resonance column used for the monotonicity gate
+          Iu_row[m] = r.I_u;
+        }
+      }
+    }
+    char buf[220];
+    std::snprintf(
+      buf, sizeof(buf), "I_u(relax_u=0) = %.4f at f = 0.8 f0", Iu_row[0]);
+    check(
+      Iu_row[0] < 0.05,
+      "relax_u = 0 injects nothing (no amplitude slot: I.3e)", buf);
+    std::snprintf(
+      buf, sizeof(buf), "I_u = %.3f -> %.3f -> %.3f for relax_u 0.5 -> 2 -> 5",
+      Iu_row[1], Iu_row[2], Iu_row[3]);
+    check(
+      (Iu_row[1] < Iu_row[2]) && (Iu_row[2] < Iu_row[3]),
+      "off-resonance injection stiffens with relax_u", buf);
+  } else {
+    const Real k = relax_cli > 0.0 ? relax_cli : 2.0;
+    std::printf(
+      "\nT5  standing-wave pattern under forcing (relax_u = %.2f, "
+      "f0 = %.1f Hz)\n", k, f0);
+    std::printf(
+      "    P_RMS(x) in dyn/cm^2 at 17 stations, against the analytic\n"
+      "    envelope shape |sin(k_eff (L-x))|, k_eff = round-trip phase / "
+      "2L.\n\n");
+    for (int j = 0; j < 3; j++) {
+      const DuctForcedResult r = duct_forced(k, fr[j], n, 6, 4);
+      // Analytic envelope shape for the reflecting end: |sin(k_eff (L-x))|
+      // with k_eff from the Doppler-mean wavenumber.
+      const Real keff = duct_roundtrip_phase(fr[j], cs.L, c0, u0) / (2.0 * cs.L);
+      Real num = 0.0, mag_m = 0.0, mag_a = 0.0, pk = 0.0;
+      std::printf("    f/f0 = %.2f\n      x/L :", fr[j] / f0);
+      for (int s = 0; s < 17; s++) {
+        std::printf(" %6.2f", s / 16.0);
+      }
+      std::printf("\n      Prms:");
+      for (int s = 0; s < 17; s++) {
+        const int i = std::min(
+          static_cast<int>((s / 16.0) * (n - 1) + 0.5), n - 1);
+        std::printf(" %6.1f", r.prms[i]);
+      }
+      std::printf("\n      anly:");
+      for (int s = 0; s < 17; s++) {
+        const int i = std::min(
+          static_cast<int>((s / 16.0) * (n - 1) + 0.5), n - 1);
+        const Real x = (i + 0.5) * (cs.L / n);
+        const Real a = std::abs(std::sin(keff * (cs.L - x)));
+        const Real m = r.prms[i];
+        num += a * m;
+        mag_m += m * m;
+        mag_a += a * a;
+        pk = std::max(pk, m);
+        std::printf(" %6.2f", a);
+      }
+      const Real corr = num / std::max(
+        std::sqrt(mag_m * mag_a), 1.0e-300);
+      char buf[220];
+      std::snprintf(
+        buf, sizeof(buf), "shape correlation %.3f, antinode P_RMS %.1f",
+        corr, pk);
+      if (std::abs(fr[j] / f0 - 1.0) > 0.05) {
+        check(corr > 0.95, "standing-wave geometry matches the envelope", buf);
+      } else {
+        report("on-resonance profile (amplitude is the finding)", buf);
+      }
+    }
+  }
+}
+
 int
 main(int argc, char* argv[])
 {
   amrex::Initialize(argc, argv, false);
   {
-    const bool sweep = (argc > 1) && (std::string(argv[1]) == "sweep");
+    // CLI: [mode] [key=value ...].  Modes: (none) = the check suite,
+    // "sweep" = suite + sigma table, "t1"/"t3"/"t5" = the duct
+    // injection-fidelity modes (Part III of the design doc), which run
+    // alone.  Keys: n= (duct resolution), relax_u= (T5 inlet stiffness).
+    const std::string mode = (argc > 1) ? argv[1] : "";
+    int duct_n = 200;
+    Real relax_cli = -1.0;
+    for (int a = 2; a < argc; a++) {
+      const std::string s(argv[a]);
+      const auto eq = s.find('=');
+      if (eq == std::string::npos) {
+        continue;
+      }
+      const std::string key = s.substr(0, eq);
+      const Real val = std::atof(s.c_str() + eq + 1);
+      if (key == "n") {
+        duct_n = static_cast<int>(val);
+      } else if (key == "relax_u") {
+        relax_cli = val;
+      }
+    }
+    if (mode == "t1" || mode == "t3" || mode == "t5") {
+      std::printf("\nnscbc1d duct mode: %s\n", mode.c_str());
+      if (mode == "t1") {
+        run_t1(std::min(duct_n, 200) / 2); // step response resolves fine coarse
+      } else {
+        run_t3_t5(mode == "t5", duct_n, relax_cli);
+      }
+      std::printf("\n%d passed, %d failed\n\n", n_pass, n_fail);
+      amrex::Finalize();
+      return (n_fail == 0) ? 0 : 1;
+    }
+
+    const bool sweep = (mode == "sweep");
     std::printf("\nnscbc1d -- standalone verification of Source/NSCBC.H\n");
     std::printf(
       "EOS: %s,  NUM_SPECIES = %d,  NVAR = %d\n\n",
