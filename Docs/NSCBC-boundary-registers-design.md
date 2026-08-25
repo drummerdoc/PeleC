@@ -127,6 +127,51 @@ guaranteed, still gated.
   transit/decay gate and C14's sustained-backflow classification;
   advisory first, closure-coupled only after measurement.
 
+## Implementation record (phases A–C landed)
+
+What shipped deviates from the proposal in one structural way: the store is
+a flat `Gpu::DeviceVector<Real>` indexed by `(face, flattened tangential
+index, component)` — not a face-band MultiFab. The band is a 2-D skin of
+the domain; a MultiFab would buy distributed ownership at the price of
+FillPatch-adjacent machinery, and the skin is small enough (≲1 MB at
+chamber resolution) to replicate. Components:
+`{ema_Rout, ema_p, u_minus, dp_ac, trend_dS, ema_rhoc, init}`.
+
+Two lessons were paid for in measurement:
+
+* **The invariant needs a time-frozen impedance** (`ema_rhoc`). With the
+  instantaneous local `rho c`, the mean `p/(ρc)` (~10⁴ cm/s) times the
+  coherent impedance oscillation aliases into `R_out` at signal amplitude.
+  Driver with `NSCBC1D_LOCAL_RC=1`: I_in degrades 1.03 → 1.61; PeleC
+  measured 1.59 before the fix and 0.970 after. The kernel's per-fill
+  frozen `rho_c` is immune (stencil difference at one instant); a register
+  differences across time and is not.
+* **`amrex::DefaultGeometry().Domain()` is not a reliable level test** in
+  the fill path: the comparison silently failed, the fill never took the
+  register pointer, and the composition was a no-op (I_in bit-identical to
+  feed-forward-only). The store now records the domain it was sized for
+  and `nscbc_registers_peek(dom)` returns null for any other box — the
+  level test and the staleness test are the same comparison.
+
+Gates, all green: driver t3 register+FF I_in ∈ [0.85, 1.15] across the
+matrix; driver ndnr σ = 16 reflection 28.14% → 3.56%; PeleC duct NRI point
+I_in = 0.970 (driver 1.031); PeleC planar σ = 16 NDNR 30.10% → 3.66% with
+the mean held to 37 ppm; restart bit-identity with `NSCBCRegisters` in the
+checkpoint. Measured tables: `Exec/RegTests/NSCBC-Acoustic/README.md`.
+
+Determinism, measured not assumed: n1 vs n6 of the same MPI binary is
+bit-identical on every state field with NDNR on — including a 400×64 grid
+with `max_grid_size=32`, which splits the register faces *tangentially*
+across ranks. That case was run because the zero-on-unowned-ranks ownership
+invariant looked vulnerable to corner-strip ghost fills reading unowned
+(zeroed) register entries; the vulnerability does not materialize, so the
+simple ownership design stands. (Two earlier "failures" of this test were
+artifacts worth remembering: the case's GNUmakefile builds `USE_MPI=FALSE`
+by default, so `mpiexec -n 6` launched six serial clones racing over one
+plotfile; and a multi-rank plotfile shards `Cell_D` across files, so
+file-level `cmp` against a serial run is meaningless — compare fields, not
+files.)
+
 ## Not proposed
 
 Raw time integrals without EMA (unbounded state, drift); any state inside

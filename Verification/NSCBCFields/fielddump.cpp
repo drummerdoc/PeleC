@@ -115,7 +115,7 @@ main(int argc, char* argv[])
     for (int k = 0; k < nz; ++k) {
       for (int j = 0; j < ny; ++j) {
         for (int i = 0; i < nx; ++i) {
-          std::fprintf(f, "%.10e ", a[idx(i, j, k)]);
+          std::fprintf(f, "%.17e ", a[idx(i, j, k)]);
         }
         std::fprintf(f, "\n");
       }

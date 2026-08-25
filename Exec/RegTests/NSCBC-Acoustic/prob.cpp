@@ -25,6 +25,7 @@ amrex_probinit(
     pp.query("u0", pp_d->u0);
     pp.query("force_amp", pp_d->force_amp);
     pp.query("force_freq", pp_d->force_freq);
+    pp.query("force_feedforward", pp_d->force_feedforward);
 
     // x0 accepts either a single value -- the historical spelling, which sets
     // the streamwise position of the planar pulse -- or one per direction.

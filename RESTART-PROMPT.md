@@ -155,13 +155,23 @@ unchanged to the digit; chamber table regenerated (README).
    the learned reference mean (EMA of R₋, τ = 3 t_a). Register + dudt measured in the
    driver-held-register prototype: I_in = 0.89–1.08 over the full 3-stiffness ×
    3-frequency matrix including ON resonance, vs 0.07–4.7 classical — Daviller's I ≡ 1,
-   transplanted. REMAINING (the note's phases): A — PeleC register infrastructure
-   (face-band MF, once-per-advance EMA update, BCfill target composition, checkpoint +
-   restart-bit-identity gate, gate the driver t3 rows); B — NDNR outlets (ema_pplus,
-   kill the 28% at σ=16-class anchoring); C — trend gates for C11x/C14.
+   transplanted. PHASES A–C IMPLEMENTED IN PELEC (2026-08-25): flat replicated-band
+   store in `BCfill.cpp` (`pelec.bc_nscbc_nri` inlets, `pelec.bc_nscbc_ndnr` outlets;
+   update once per level-0 advance from the PeleC::advance dispatcher, BCfill composes
+   the effective Target, kernel stays pure; trend_dS advisory only). Gates green: PeleC
+   duct NRI point I_in = 0.970 (driver 1.031, FF-only 2.42); planar σ=16 NDNR 30.10% →
+   3.66% with the mean anchored to 37 ppm (driver 28.14% → 3.56%); restart bit-identity
+   (`NSCBCRegisters` in the checkpoint); n1-vs-n6 bit-identity incl. tangentially-split
+   register faces. Two paid-for lessons live in the design note's implementation
+   record: the invariant needs a TIME-FROZEN impedance (`ema_rhoc`; local rho·c aliases
+   the mean p/(ρc) into R_out at signal amplitude — degraded I_in 1.03→1.6 in BOTH
+   codes), and `amrex::DefaultGeometry().Domain()` is not a reliable level test in the
+   fill (the store now records its own domain; peek(dom) is the level test). Testing
+   traps: NSCBC-Acoustic's GNUmakefile is `USE_MPI=FALSE` — six mpiexec clones race one
+   plotfile; multi-rank plotfiles shard `Cell_D`, so compare fields, never files.
 5. Hardware-gated: CUDA/HIP compile, CPU-vs-GPU on NSCBC-Acoustic, register-spill profile.
 6. Upstream: curate the branch into an AMReX-Combustion PR when ready.
 
 Start by confirming `git status` is clean (untracked `PAPERS/` is expected) and the driver
-runs green, then pick up the queue at item 1 — or at item 3's write-up if the Lesson-9
-production plotfiles have arrived — unless I say otherwise.
+runs green, then pick up the queue at item 5 (hardware-gated GPU work) or item 6
+(upstream PR curation) — unless I say otherwise.

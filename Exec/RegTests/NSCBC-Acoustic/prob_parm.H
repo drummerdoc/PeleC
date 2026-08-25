@@ -30,6 +30,9 @@ struct ProbParmDevice
   amrex::Real u0 = 0.0;         // mean inflow [cm/s]
   amrex::Real force_amp = 0.0;  // forcing amplitude on the u target [cm/s]
   amrex::Real force_freq = 0.0; // forcing frequency [Hz]
+  int force_feedforward = 0;    // emit Target::dudt (the stateless injection
+                                // slot); off preserves the classical-inlet
+                                // tables exactly
 
   // Pulse centre and width, as fractions of the domain extent in each
   // direction.  For pulse_type = 0 only the first component of x0 is used and

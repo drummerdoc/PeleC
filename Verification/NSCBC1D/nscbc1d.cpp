@@ -626,7 +626,8 @@ check_species()
 //     is the curve the AMReX regression test is checked against.
 Real
 reflection_coefficient(
-  Real sigma, int n, int order, bool pin, Real* p_drift, bool mat = false)
+  Real sigma, int n, int order, bool pin, Real* p_drift, bool mat = false,
+  bool ndnr = false)
 {
   Case cs;
   cs.n = n;
@@ -683,6 +684,14 @@ reflection_coefficient(
   // measurement window: the left half, after the pulse has left
   const Real t_measure = 0.9 * cs.L / c0;
 
+  // NDNR register (queue item 4, phase B): a driver-held EMA of the
+  // boundary-cell pressure, tau = 3 t_a, updated once per step outside the
+  // stages.  The kernel sees a composed target p_eff = p_b - EMA + p0, so
+  // its relaxation K (p_b - p_eff) = K (EMA - p0) acts on the slow mean
+  // only -- the acoustic fluctuation is stripped before sigma touches it.
+  Real ema_p = cs.p0;
+  const Real tau_ema = 3.0 * (2.0 * cs.L / c0);
+
   while (t < t_end) {
     Real cmax = 0.0;
     for (int i = 0; i < cs.n; i++) {
@@ -695,9 +704,17 @@ reflection_coefficient(
       break;
     }
 
-    fill_bcs(f, off, out, prm, dx);
+    pc_nscbc::Target out_eff = out;
+    if (ndnr) {
+      const Prim qb = get_prim(f.at(cs.n - 1));
+      const Real w = dt / (tau_ema + dt);
+      ema_p += w * (qb.p - ema_p);
+      out_eff.p = qb.p - ema_p + cs.p0;
+    }
+
+    fill_bcs(f, off, out_eff, prm, dx);
     stage(f, g, dx, dt);
-    fill_bcs(g, off, out, prm, dx);
+    fill_bcs(g, off, out_eff, prm, dx);
     stage(g, h, dx, dt);
     for (int i = 0; i < cs.n; i++) {
       for (int v = 0; v < NVAR; v++) {
@@ -3171,7 +3188,12 @@ duct_forced(
     Real u_minus = 0.0;
     if ((mode == 1) || (mode == 3)) {
       const Prim qb = get_prim(f.at(0));
-      const Real Rm = qb.u - qb.p / rhoc0;
+      // mode >= 4 flag reserved; local-impedance probe via env is clunky --
+      // hardwire the experiment: LOCAL rho c instead of the frozen ambient.
+      const Real rhoc_loc = qb.rho * sound_speed(qb);
+      const bool local_rc = (std::getenv("NSCBC1D_LOCAL_RC") != nullptr);
+      const Real rc = local_rc ? rhoc_loc : rhoc0;
+      const Real Rm = qb.u - qb.p / rc;
       const Real w = dt / (tau_ema + dt);
       ema_Rm += w * (Rm - ema_Rm);
       u_minus = 0.5 * (Rm - ema_Rm);
@@ -3427,15 +3449,28 @@ run_t3_t5(bool profiles, int n, Real relax_cli)
       const char* names[] = {"", "NRI register", "dudt feed-forward",
                              "register + feed-forward"};
       std::printf("\n    same matrix, %s:\n", names[md]);
+      Real imin = 1.0e30, imax = 0.0;
       for (int m2 = 1; m2 < 4; m2++) {
         for (int j = 0; j < 3; j++) {
           const DuctForcedResult rn = duct_forced(kv[m2], fr[j], n, 6, 4, md);
+          imin = std::min(imin, rn.I_in);
+          imax = std::max(imax, rn.I_in);
           std::snprintf(
             buf, sizeof(buf),
             "relax_u %.2f, f/f0 %.2f: I_in = %.3f  (I_u = %.3f)", kv[m2],
             fr[j] / f0, rn.I_in, rn.I_u);
           report(names[md], buf);
         }
+      }
+      if (md == 3) {
+        // Phase-A driver gate: the full NRI property, I_in ~ 1 at every
+        // stiffness and frequency measured, resonance included.
+        std::snprintf(
+          buf, sizeof(buf), "I_in in [%.3f, %.3f] over the matrix", imin,
+          imax);
+        check(
+          (imin > 0.85) && (imax < 1.15),
+          "register + feed-forward: I_in ~ 1 at any K and f", buf);
       }
     }
   } else {
@@ -3491,6 +3526,44 @@ run_t3_t5(bool profiles, int n, Real relax_cli)
   }
 }
 
+// Phase-B driver gate: the NDNR register must collapse the reflection at
+// strong anchoring while keeping the anchoring itself.  sigma = 16 is the
+// measured 28%-reflection price; NDNR's claim is that the price vanishes
+// because the acoustics never reach the relaxation.
+void
+run_ndnr()
+{
+  std::printf(
+    "\nNDNR  EMA-mean relaxation vs classical (pulse reflection, "
+    "n = 400)\n\n");
+  std::printf(
+    "    %8s %12s %12s %14s %14s\n", "sigma", "R_cl [%]", "R_ndnr [%]",
+    "drift_cl", "drift_ndnr");
+  Real Rc16 = 0.0, Rn16 = 0.0, dc16 = 0.0, dn16 = 0.0;
+  for (const Real sg : {0.25, 4.0, 16.0}) {
+    Real dc = 0.0, dn = 0.0;
+    const Real Rc = reflection_coefficient(sg, 400, 2, false, &dc);
+    const Real Rn =
+      reflection_coefficient(sg, 400, 2, false, &dn, false, true);
+    std::printf(
+      "    %8.2f %12.3f %12.3f %14.2f %14.2f\n", sg, 100.0 * Rc, 100.0 * Rn,
+      dc, dn);
+    if (sg == 16.0) {
+      Rc16 = Rc; Rn16 = Rn; dc16 = dc; dn16 = dn;
+    }
+  }
+  char buf[220];
+  std::snprintf(
+    buf, sizeof(buf), "R 16: %.2f%% -> %.2f%%; drift %.1f -> %.1f",
+    100.0 * Rc16, 100.0 * Rn16, dc16, dn16);
+  check(
+    Rn16 < 0.2 * Rc16,
+    "NDNR collapses the sigma = 16 reflection (>5x)", buf);
+  check(
+    std::abs(dn16) < 3.0 * std::abs(dc16) + 5.0,
+    "NDNR keeps the anchoring (drift comparable)", buf);
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -3517,10 +3590,12 @@ main(int argc, char* argv[])
         relax_cli = val;
       }
     }
-    if (mode == "t1" || mode == "t3" || mode == "t5") {
+    if (mode == "t1" || mode == "t3" || mode == "t5" || mode == "ndnr") {
       std::printf("\nnscbc1d duct mode: %s\n", mode.c_str());
       if (mode == "t1") {
         run_t1(std::min(duct_n, 200) / 2); // step response resolves fine coarse
+      } else if (mode == "ndnr") {
+        run_ndnr();
       } else {
         run_t3_t5(mode == "t5", duct_n, relax_cli);
       }

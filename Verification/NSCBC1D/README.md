@@ -289,11 +289,12 @@ resonance; that is the measured cost of statelessness at the inlet, and the
 NRI/register discussion (design doc II.2, queue item 4) is the literature's
 answer to exactly this table.
 
-**t3 also carries the queue-item-4 prototypes** (reported, not yet gated):
-the same matrix under three inlet models, with the register held by the
-*driver loop* — updated once per step outside the stages, read frozen —
-which is the boundary-registers architecture with the kernel untouched.
-I_in (Daviller's index, incoming amplitude over the ideal injector's):
+**t3 also carries the queue-item-4 prototypes** (register + feed-forward
+GATED at I_in ∈ [0.85, 1.15] across the matrix): the same matrix under
+three inlet models, with the register held by the *driver loop* — updated
+once per step outside the stages, read frozen — which is the
+boundary-registers architecture with the kernel untouched. I_in
+(Daviller's index, incoming amplitude over the ideal injector's):
 
 | inlet model | I_in over the 9-point matrix |
 |---|---|
@@ -309,6 +310,17 @@ mean* that lets the relaxation ignore the returning wave. Together they
 put I_in within ~10% of unity at every stiffness and frequency, and the
 residual velocity pattern is the duct's own `|1+e^{iθ}|/2` to three
 digits. Full design: `Docs/NSCBC-boundary-registers-design.md`.
+
+Two register footnotes. `./nscbc1d ndnr` is the outlet-side twin (gated):
+relaxing toward the register's EMA mean instead of the fixed far-field
+collapses the σ = 16 planar-pulse reflection 28.14% → 3.56% while keeping
+the anchor. And the register invariant is referenced to the *frozen
+ambient* ρc on purpose: `NSCBC1D_LOCAL_RC=1` re-runs t3 with the
+instantaneous local impedance instead, degrading register+FF to
+I_in = 1.61 at relax_u = 2 — the mean p/(ρc) times the coherent impedance
+oscillation aliases into R₋ at signal amplitude. Kept as a runnable
+forensic; PeleC carries the same reference as a slow-EMA'd `ema_rhoc`
+(`Exec/RegTests/NSCBC-Acoustic/README.md` for its half of both tables).
 
 **t5 — standing-wave pattern (Daviller §7).** Same runs; P_RMS(x) at 17
 stations against the analytic envelope |sin(k_eff(L−x))|. Shape correlation

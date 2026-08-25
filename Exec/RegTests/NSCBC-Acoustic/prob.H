@@ -208,11 +208,16 @@ struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
       // back to bcnormal's hard-pressure ghost: the fully reflecting far end.
       if ((idir == 0) && (sgn == +1)) {
         t.type = pc_nscbc::Type::inflow;
-        t.u[0] = prob_parm.u0 +
-                 prob_parm.force_amp *
-                   std::sin(
-                     2.0 * amrex::Math::pi<amrex::Real>() *
-                     prob_parm.force_freq * time);
+        const amrex::Real om =
+          2.0 * amrex::Math::pi<amrex::Real>() * prob_parm.force_freq;
+        t.u[0] = prob_parm.u0 + prob_parm.force_amp * std::sin(om * time);
+        // The stateless injection slot (Target::dudt): the analytic rate of
+        // the forcing, so the signal does not ride the relaxation.  Opt-in
+        // (prob.force_feedforward) so the classical-inlet tables stay
+        // reproducible.
+        if (prob_parm.force_feedforward != 0) {
+          t.dudt = prob_parm.force_amp * om * std::cos(om * time);
+        }
         t.T = prob_parm.T_amb;
         t.Y[0] = 1.0;
         for (int n = 1; n < NUM_SPECIES; n++) {
