@@ -203,7 +203,20 @@ unchanged to the digit; chamber table regenerated (README).
      ptxas register counts on the fill kernel (it carries Y[NUM_SPECIES] locals and
      the EOS; spill is the expected risk with LiDryer/drm19), then ncu occupancy if
      it spills. The 1-D driver is a host tool — no GPU work there.
-6. Upstream: curate the branch into an AMReX-Combustion PR when ready.
+6. Upstream: curate the branch into an AMReX-Combustion PR when ready. ADOPTED SHAPE
+   (2026-08-26): branch `nscbc-collapsed` — the 60 commits collapsed to 4 by
+   restoring path groups from nscbc's final tree onto ac17bd0 (never rebase -i: the
+   topics interleave, restore-by-path is conflict-free and endpoint-exact):
+   (1) core — `Source/ Tests/CMakeLists.txt Exec/RegTests/MMS/mms-4.inp .gitignore`;
+   (2) verification — `Verification/ .github/workflows/ci.yml`;
+   (3) cases — `Exec/RegTests/NSCBC-* Exec/RegTests/CMakeLists.txt`;
+   (4) docs — `Docs/NSCBC-design-and-literature-review.md
+   Docs/NSCBC-boundary-registers-design.md Docs/sphinx/BoundaryConditions.rst`.
+   Working notes are DROPPED (CLAUDE.md, RESTART-PROMPT.md, the curriculum and the
+   reversal-forensics docs). The audit invariant: `git diff nscbc-collapsed nscbc`
+   must list exactly those dropped files and nothing else — run it before trusting
+   the branch, and rebuild the 4 commits fresh (same recipe, in a worktree, then
+   `git worktree remove` keeping the branch) whenever nscbc advances.
 
 Start by confirming `git status` is clean (untracked `PAPERS/` is expected) and the driver
 runs green, then pick up the queue at item 5 (hardware-gated GPU work) or item 6
