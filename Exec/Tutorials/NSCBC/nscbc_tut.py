@@ -1,6 +1,6 @@
 """Shared helpers for the NSCBC tutorial plot scripts.
 
-Needs numpy, matplotlib and yt (pip install numpy matplotlib yt).
+Needs numpy and matplotlib only; plotfiles are read directly.
 """
 
 import glob
@@ -23,21 +23,58 @@ def plotfiles(run_dir):
     )
 
 
-def load(pltfile, fields):
-    """Level-0 arrays of the given fields, plus time and cell centres."""
-    import yt
+def _parse_box(text):
+    """'((lo...) (hi...) (type...))' -> (lo, hi) integer tuples."""
+    import re
 
-    yt.set_log_level(50)
-    ds = yt.load(pltfile)
-    cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
-    out = {f: np.array(cg["boxlib", f]) for f in fields}
-    lo = np.array(ds.domain_left_edge)
-    hi = np.array(ds.domain_right_edge)
-    n = np.array(ds.domain_dimensions)
-    dx = (hi - lo) / n
-    out["x"] = lo[0] + (np.arange(n[0]) + 0.5) * dx[0]
-    out["time"] = float(ds.current_time)
-    return out
+    nums = [list(map(int, g.split(","))) for g in re.findall(r"\(([-\d,]+)\)", text)]
+    return nums[0], nums[1]
+
+
+def load(pltfile, fields):
+    """Level-0 arrays of the given fields (shape nx, ny[, nz]) from an AMReX
+    plotfile, plus its time and the x cell centres.  Reads the files
+    directly with numpy: single-level, cell-centred data, double precision,
+    which is what every rung writes."""
+    with open(os.path.join(pltfile, "Header")) as f:
+        lines = f.read().split("\n")
+    ncomp = int(lines[1])
+    names = [lines[2 + i].strip() for i in range(ncomp)]
+    k = 2 + ncomp
+    dim = int(lines[k])
+    time = float(lines[k + 1])
+    lo = np.array(lines[k + 3].split(), dtype=float)
+    hi = np.array(lines[k + 4].split(), dtype=float)
+    dlo, dhi = _parse_box(lines[k + 6])
+    shape = tuple(dhi[d] - dlo[d] + 1 for d in range(dim))
+
+    lev = os.path.join(pltfile, "Level_0")
+    with open(os.path.join(lev, "Cell_H")) as f:
+        h = f.read().split("\n")
+    boxes, fabs = [], []
+    for line in h:
+        if line.startswith("((") and line.count("(") >= 4:  # a box
+            boxes.append(_parse_box(line))
+        elif line.startswith("FabOnDisk:"):
+            _, fname, off = line.split()
+            fabs.append((fname, int(off)))
+    data = {n: np.empty(shape) for n in fields}
+    for (blo, bhi), (fname, off) in zip(boxes, fabs):
+        with open(os.path.join(lev, fname), "rb") as f:
+            f.seek(off)
+            header = f.readline().decode()
+            nc = int(header.split()[-1])
+            n = [bhi[d] - blo[d] + 1 for d in range(dim)]
+            raw = np.fromfile(f, dtype="<f8", count=int(np.prod(n)) * nc)
+        # Fortran order: x fastest, one component after another.
+        raw = raw.reshape([nc] + n[::-1])
+        sl = tuple(slice(blo[d] - dlo[d], bhi[d] - dlo[d] + 1) for d in range(dim))
+        for fld in fields:
+            data[fld][sl] = raw[names.index(fld)].T
+    dx = (hi - lo) / np.array(shape)
+    data["x"] = lo[0] + (np.arange(shape[0]) + 0.5) * dx[0]
+    data["time"] = time
+    return data
 
 
 def transverse_mean(a):

@@ -52,12 +52,18 @@ run_variant() {
   echo "   $name"
   (
     cd "$out" || exit 1
+    # Success is judged from the log, not the exit code: some compilers
+    # (GCC 15) crash in a PelePhysics static destructor after the run has
+    # finished and written everything (see the tutorial README).
     if [ "$USE_MPI" = "TRUE" ]; then
-      $MPIEXEC -n "$NPROCS" "$EXE" "$inputs" "$@" > run.log 2>&1
+      $MPIEXEC -n "$NPROCS" "$EXE" "$inputs" "$@" > run.log 2>&1 || true
     else
-      "$EXE" "$inputs" "$@" > run.log 2>&1
+      "$EXE" "$inputs" "$@" > run.log 2>&1 || true
     fi
-    grep -q "Ending run" run.log && touch done ||
+    if grep -q "Ending run" run.log; then
+      touch done
+    else
       echo "   $name FAILED: see $out/run.log"
+    fi
   )
 }

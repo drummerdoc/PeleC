@@ -20,7 +20,7 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 |---|---|---|---|---|
 | [1](01-outflow-pulse/README.md) | Why a characteristic outflow? | NSCBC-Acoustic 2-D | 1 min | ready |
 | [2](02-outflow-sigma/README.md) | σ: letting waves out against holding the mean | NSCBC-Acoustic 2-D | 5 min | ready |
-| 3 | Subsonic inflow: `relax_u`, forcing (`dudt`) and the NRI register | NSCBC-Acoustic duct | — | planned |
+| [3](03-inflow/README.md) | Subsonic inflow: `relax_u`, forcing (`dudt`) and the NRI register | NSCBC-Acoustic duct | 2 min | ready |
 | 4 | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | — | planned |
 | 5 | Oblique waves and vortices: the transverse weight β | NSCBC-COVO | — | planned |
 | 6 | What may cross an outflow: vortices, entropy and composition fronts, flames; the flame closures | NSCBC-COVO, NSCBC-FlameOutflow | — | planned |
@@ -40,8 +40,13 @@ python plot.py      # writes the figure here and prints measured vs reference
 (default `TRUE`), `NPROCS` (default 4), `MAKE_JOBS`, `MPIEXEC`, `PELE_HOME`.
 
 Prerequisites: a working PeleC build environment (the cases build with
-GNU make), MPI, and Python 3 with `numpy`, `matplotlib` and `yt`
-(`pip install numpy matplotlib yt`).
+GNU make), MPI, and Python 3 with `numpy` and `matplotlib`. The plot scripts
+read the plotfiles directly; no other package is needed.
+
+If a run's log ends with a segmentation fault *after* `AMReX ... finalized`,
+the run itself completed: some compilers (seen with GCC 15) crash in a
+PelePhysics static destructor at exit. `run.sh` judges success from the
+log, not the exit code.
 
 ## Conventions
 

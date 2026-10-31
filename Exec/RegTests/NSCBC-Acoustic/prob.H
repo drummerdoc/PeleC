@@ -103,7 +103,7 @@ pc_initdata(
   if (prob_parm.pulse_type == 0) {
     vel[0] = dp / (prob_parm.rho_amb * prob_parm.cs_amb);
   } else if (prob_parm.pulse_type == 2) {
-    vel[0] = prob_parm.u0;
+    vel[0] = prob_parm.u_init;
   }
   const amrex::Real ke =
     0.5 * AMREX_D_TERM(vel[0] * vel[0], +vel[1] * vel[1], +vel[2] * vel[2]);

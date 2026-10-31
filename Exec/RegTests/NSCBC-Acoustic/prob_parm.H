@@ -28,6 +28,8 @@ struct ProbParmDevice
 
   // Duct-mode (pulse_type = 2) parameters.
   amrex::Real u0 = 0.0;         // mean inflow [cm/s]
+  amrex::Real u_init = 0.0;     // initial duct velocity [cm/s]; defaults to
+                                // u0, set it apart for a step in the target
   amrex::Real force_amp = 0.0;  // forcing amplitude on the u target [cm/s]
   amrex::Real force_freq = 0.0; // forcing frequency [Hz]
   int force_feedforward = 0;    // emit Target::dudt (the stateless injection

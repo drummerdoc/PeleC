@@ -200,6 +200,10 @@ right escalation.
 ./duct_metrics.py <rundir> --freq <f>
 ```
 
+`prob.u_init` sets the initial duct velocity apart from the inlet target
+`prob.u0` (default: equal), for step tests such as rung 3 of
+`Exec/Tutorials/NSCBC`.
+
 `pulse_type = 2`: a uniform stream enters through a characteristic INFLOW at
 x-lo whose velocity target carries a harmonic forcing (the `time` argument of
 `bcnormal_nscbc`, finally consumed), and x-hi falls back to the case's
