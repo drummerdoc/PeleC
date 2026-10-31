@@ -97,7 +97,7 @@ pc_initdata(
   // what makes the outgoing front isotropic by construction.
   const amrex::Real p = prob_parm.p_amb + dp;
   const amrex::Real rho =
-    prob_parm.rho_amb + dp / (prob_parm.cs_amb * prob_parm.cs_amb);
+    prob_parm.rho_init + dp / (prob_parm.cs_amb * prob_parm.cs_amb);
 
   amrex::Real vel[AMREX_SPACEDIM] = {AMREX_D_DECL(0.0, 0.0, 0.0)};
   if (prob_parm.pulse_type == 0) {
@@ -237,6 +237,16 @@ struct MyProblemSpecificFunctions : public DefaultProblemSpecificFunctions
     if (live) {
       t.type = pc_nscbc::Type::outflow;
       t.p = prob_parm.p_amb;
+      if ((idir == 0) && (sgn == +1)) {
+        t.p += prob_parm.p_lo_offset;
+      }
+      // The reservoir beyond the face, read only by backflow_material when
+      // gas enters through this outflow: ambient air.
+      t.T = prob_parm.T_amb;
+      for (amrex::Real& yv : t.Y) {
+        yv = 0.0;
+      }
+      t.Y[0] = 1.0;
     }
     return t;
   }

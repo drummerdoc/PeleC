@@ -202,7 +202,10 @@ right escalation.
 
 `prob.u_init` sets the initial duct velocity apart from the inlet target
 `prob.u0` (default: equal), for step tests such as rung 3 of
-`Exec/Tutorials/NSCBC`.
+`Exec/Tutorials/NSCBC`. For the flush test of rung 7, `prob.T_init` sets the
+initial temperature (default `T_amb`) and `prob.p_lo_offset` offsets the
+x-lo outflow target (default 0); the outflow targets carry the ambient
+reservoir state, read only by `pelec.bc_nscbc_backflow_material`.
 
 `pulse_type = 2`: a uniform stream enters through a characteristic INFLOW at
 x-lo whose velocity target carries a harmonic forcing (the `time` argument of

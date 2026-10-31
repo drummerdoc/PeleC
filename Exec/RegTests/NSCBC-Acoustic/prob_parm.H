@@ -27,6 +27,13 @@ struct ProbParmDevice
   int pulse_type = 0;
 
   // Duct-mode (pulse_type = 2) parameters.
+  // Flush test (Exec/Tutorials/NSCBC rung 7): an offset on the x-lo outflow
+  // target pressure (a sink below ambient draws flow in through x-hi) and
+  // an initial temperature for the whole domain.  Defaults: the plain case.
+  amrex::Real p_lo_offset = 0.0; // [dyn/cm^2]
+  amrex::Real T_init = -1.0;     // [K]; <= 0 means T_amb
+  amrex::Real rho_init = 0.0;    // filled by amrex_probinit
+
   amrex::Real u0 = 0.0;         // mean inflow [cm/s]
   amrex::Real u_init = 0.0;     // initial duct velocity [cm/s]; defaults to
                                 // u0, set it apart for a step in the target

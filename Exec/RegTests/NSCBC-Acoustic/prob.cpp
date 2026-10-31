@@ -28,6 +28,8 @@ amrex_probinit(
     pp.query("force_feedforward", pp_d->force_feedforward);
     pp_d->u_init = pp_d->u0;
     pp.query("u_init", pp_d->u_init);
+    pp.query("p_lo_offset", pp_d->p_lo_offset);
+    pp.query("T_init", pp_d->T_init);
 
     // x0 accepts either a single value -- the historical spelling, which sets
     // the streamwise position of the planar pulse -- or one per direction.
@@ -73,6 +75,12 @@ amrex_probinit(
   eos.RTY2Cs(rho, pp_d->T_amb, massfrac, cs);
   pp_d->rho_amb = rho;
   pp_d->cs_amb = cs;
+  if (pp_d->T_init <= 0.0) {
+    pp_d->T_init = pp_d->T_amb;
+  }
+  amrex::Real rho_i = 0.0, eint_i = 0.0;
+  eos.PYT2RE(pp_d->p_amb, massfrac, pp_d->T_init, rho_i, eint_i);
+  pp_d->rho_init = rho_i;
 
   amrex::Print() << "\n  NSCBC-Acoustic (" << AMREX_SPACEDIM
                  << "D): rho_amb = " << rho << " g/cc, c_amb = " << cs

@@ -24,7 +24,7 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 | [4](04-turbulent-inflow/README.md) | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | 8 min | ready |
 | [5](05-transverse/README.md) | Oblique waves and vortices: the transverse weight β | NSCBC-COVO | 4 min | ready |
 | 6 | What may cross an outflow: vortices, entropy and composition fronts, flames; the flame closures | NSCBC-COVO, NSCBC-FlameOutflow | — | planned |
-| 7 | Flow reversal at a vent and sustained backflow | NSCBC-Chamber | — | planned |
+| [7](07-backflow/README.md) | Flow entering through an outflow: reversal and sustained backflow | NSCBC-Acoustic | 2 min | ready |
 | 8 | When the answer is a longer domain | NSCBC-FlameOutflow, NSCBC-Chamber | — | planned |
 
 ## Running a rung
