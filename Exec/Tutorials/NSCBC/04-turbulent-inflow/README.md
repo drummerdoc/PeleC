@@ -74,7 +74,8 @@ averaged across the duct and over 1–3 ms. At the first cell:
   outgoing acoustic wave from `u + p / ρc` at the inlet, and a convected
   eddy's velocity looks like an outgoing wave to it; half of each eddy is fed
   back into the target and the normal fluctuation is amplified (1.40). NRI is
-  for injecting acoustic signals (rung 3).
+  for injecting acoustic signals (rung 3); PeleC warns when it is enabled
+  together with TurbInflow.
 * The decay downstream is the same in every run: the turbulence decays and
   the 0.5 cm eddies are only about eight cells across. It is not the boundary.
 

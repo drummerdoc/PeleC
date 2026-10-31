@@ -33,7 +33,7 @@ def _parse_box(text):
 
 def load(pltfile, fields):
     """Level-0 arrays of the given fields (shape nx, ny[, nz]) from an AMReX
-    plotfile, plus its time and the x cell centres.  Reads the files
+    plotfile, plus its time and the cell centres x, y[, z].  Reads the files
     directly with numpy: single-level, cell-centred data, double precision,
     which is what every rung writes."""
     with open(os.path.join(pltfile, "Header")) as f:
@@ -72,7 +72,8 @@ def load(pltfile, fields):
         for fld in fields:
             data[fld][sl] = raw[names.index(fld)].T
     dx = (hi - lo) / np.array(shape)
-    data["x"] = lo[0] + (np.arange(shape[0]) + 0.5) * dx[0]
+    for d, name in enumerate("xyz"[:dim]):
+        data[name] = lo[d] + (np.arange(shape[d]) + 0.5) * dx[d]
     data["time"] = time
     return data
 
@@ -90,6 +91,31 @@ def reflection(p_final, amp):
     amplitude."""
     up = p_final[: len(p_final) // 2]
     return np.abs(up - np.median(up)).max() / amp
+
+
+def front_amplitude_spread(dp, x, y, radius, ntheta=720):
+    """Spread of the peak |dp| along rays from the domain centre, over the
+    rays whose front (at `radius`) is still well inside the domain: the
+    circular front's strength should be the same in every direction, so any
+    variation is boundary error.  Returns (spread, number of rays)."""
+    x0, y0 = 0.5 * (x[0] + x[-1]), 0.5 * (y[0] + y[-1])
+    th = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    ct, st = np.cos(th), np.sin(th)
+    with np.errstate(divide="ignore"):
+        to_x = np.where(ct != 0, (x[-1] - x0) / np.abs(ct), np.inf)
+        to_y = np.where(st != 0, (y[-1] - y0) / np.abs(st), np.inf)
+    keep = radius < 0.9 * np.minimum(to_x, to_y)
+    rr = np.linspace(0.55 * radius, 1.45 * radius, 2400)
+    R, T = np.meshgrid(rr, th[keep], indexing="ij")
+    fx = (x0 + R * np.cos(T) - x[0]) / (x[1] - x[0])
+    fy = (y0 + R * np.sin(T) - y[0]) / (y[1] - y[0])
+    i = np.clip(np.floor(fx).astype(int), 0, len(x) - 2)
+    j = np.clip(np.floor(fy).astype(int), 0, len(y) - 2)
+    tx, ty = np.clip(fx - i, 0, 1), np.clip(fy - j, 0, 1)
+    v = ((1 - tx) * (1 - ty) * dp[i, j] + tx * (1 - ty) * dp[i + 1, j]
+         + (1 - tx) * ty * dp[i, j + 1] + tx * ty * dp[i + 1, j + 1])
+    amp = np.abs(v).max(axis=0)
+    return (amp.max() - amp.min()) / amp.mean(), int(keep.sum())
 
 
 def read_datlog(path):
