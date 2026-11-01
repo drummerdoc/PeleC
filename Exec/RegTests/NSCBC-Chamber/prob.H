@@ -214,6 +214,16 @@ pc_initdata(
   for (int n = 0; n < NUM_SPECIES; n++) {
     molefrac[n] = pmf_vals[3 + n];
   }
+#ifdef H2_ID
+  if (x > prob_parm.charge_end) {
+    // Past the charge: its oxidiser alone (see ProbParmDevice::charge_end).
+    const amrex::Real rest = 1.0 - molefrac[H2_ID];
+    molefrac[H2_ID] = 0.0;
+    for (int n = 0; n < NUM_SPECIES; n++) {
+      molefrac[n] /= rest;
+    }
+  }
+#endif
   const amrex::Real T = pmf_vals[0];
   amrex::Real massfrac[NUM_SPECIES] = {0.0};
   auto eos = pele::physics::PhysicsType::eos();

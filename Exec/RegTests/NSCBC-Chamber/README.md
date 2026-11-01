@@ -42,6 +42,17 @@ make -j TPL && make -j             # or the CMake build; LiDryer / Fuego / Simpl
 builds set `USE_MPI = TRUE` (GNUmake) and run under `mpiexec`; the case is
 bit-identical across decompositions like every case in this suite.
 
+**What fills the plenum.** By default the charge fills the whole domain,
+including the duct beyond the vent. Much of what burns in the duct is real
+either way: the chamber pushes about 1 cm of unburnt charge out ahead of the
+flame, and the flame follows it past the vent plane — the external burn of a
+vented explosion, which a boundary at the vent discards. `prob.charge_end=1.2`
+fills the duct beyond x = 1.2 with the charge's air (its fuel removed), as
+beyond a real vent. Measured: it changes the closed-end trace by under
+400 dyn/cm² through 6 ms, and by up to 2,300 after, once the duct flame
+reaches gas that would otherwise have been charge. (H₂ mechanisms only; the
+default leaves the initial state bit-identical.)
+
 Cost model (measured at the shipped scale, serial Apple M-class core):
 dt ≈ 6.7×10⁻⁸ s, ~120k steps to `stop_time = 8 ms`, ≈ 2×10⁵ cell-steps/s —
 about an hour serial for the vent variant, ~2.5× that for the plenum; minutes

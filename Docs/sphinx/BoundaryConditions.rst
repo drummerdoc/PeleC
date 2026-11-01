@@ -41,6 +41,9 @@ By default, the boundaries specified as ``NoSlipWall`` and ``SlipWall`` are adia
 Navier-Stokes Characteristic Boundary Conditions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+For a hands-on walk-through of everything in this section — preconfigured runs, one figure each, showing what
+each setting does and where the boundary stops being the right tool — see :ref:`TutorialNSCBC`.
+
 Directly imposing a target state at a subsonic inflow, or extrapolating at a subsonic outflow, does not respect the
 flow of information along the solution characteristics: the resulting problem is ill-posed and acoustic waves reflect
 off the boundary back into the domain. The remedy is to decompose the boundary state into characteristic waves, take

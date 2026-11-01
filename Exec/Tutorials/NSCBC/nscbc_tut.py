@@ -17,10 +17,11 @@ GAMMA = 1.4  # GammaLaw default, used to turn the data log's rho_e into <p>
 
 
 def plotfiles(run_dir):
-    """Sorted plotfile directories of one run."""
-    return sorted(
-        d for d in glob.glob(os.path.join(run_dir, "plt*")) if os.path.isdir(d)
-    )
+    """Plotfile directories of one run, in step order (plt99999 comes before
+    plt100000)."""
+    dirs = [d for d in glob.glob(os.path.join(run_dir, "plt*"))
+            if os.path.isdir(d) and os.path.basename(d)[3:].isdigit()]
+    return sorted(dirs, key=lambda d: int(os.path.basename(d)[3:]))
 
 
 def _parse_box(text):

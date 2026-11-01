@@ -36,6 +36,13 @@ struct ProbParmDevice
   amrex::GpuArray<amrex::Real, 2> clip_lo = {{0.0, 0.0}};
   amrex::GpuArray<amrex::Real, 2> clip_hi = {{0.0, 0.0}};
 
+  // End of the combustible charge: for x > charge_end the duct holds the
+  // charge's oxidiser alone (the fuel's mole fraction removed and the rest
+  // renormalised), so a duct variant continued past the vent holds air
+  // beyond it, as a real vent has, instead of more charge.  Default: the
+  // charge fills the domain (the historical IC, bit-identical).
+  amrex::Real charge_end = 1.0e30;
+
   amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> L = {{1.0}};
   int pmf_N = 0;
   int pmf_M = 0;

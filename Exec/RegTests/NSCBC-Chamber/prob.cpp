@@ -211,6 +211,15 @@ amrex_probinit(
   pp.query("kernel_r", PeleC::h_prob_parm_device->kernel_r);
   pp.query("kernel_x", PeleC::h_prob_parm_device->kernel_x);
   pp.query("kernel_y", PeleC::h_prob_parm_device->kernel_y);
+  if (pp.query("charge_end", PeleC::h_prob_parm_device->charge_end) != 0) {
+#ifndef H2_ID
+    amrex::Abort("prob.charge_end: the fuel is taken to be H2, which this "
+                 "mechanism does not have");
+#endif
+    amrex::Print() << "     charge ends at x = "
+                   << PeleC::h_prob_parm_device->charge_end
+                   << "; air beyond it\n";
+  }
 
   // Box variants: clip the ignition structure to the chamber interior (the
   // closed-end slab is thinner than the kernel radius, and the preheat tail
