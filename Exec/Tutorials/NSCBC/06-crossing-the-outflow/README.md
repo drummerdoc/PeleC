@@ -18,10 +18,11 @@ was made by the boundary.
   (`pelec.do_react = 0`): only a hot, light, product-filled gas leaves.
 * **(B)** the flame.
 
-**Cost:** each flame run takes about 13 minutes on 6 ranks (the blocked one
-twice that), each inert run about 3; `run.sh` runs all twelve one after
-another, about 2½ hours on 4 ranks. The case splits into 12 boxes, so
-`NPROCS=12 ./run.sh` helps if you have the cores.
+**Cost:** the heaviest rung but one. The case splits into 12 boxes, so give
+it 12 ranks if you have the cores: `NPROCS=12 ./run.sh` runs all eleven
+variants in about 50 minutes, build included (each flame run about 6
+minutes, the blocked one 11, each inert run under 2). On the default 4 ranks
+expect roughly three times that.
 
 ```sh
 ./run.sh

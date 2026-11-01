@@ -1,8 +1,8 @@
 #!/bin/bash
 # Rung 6: what may cross an outflow -- a hot front with and without heat
-# release leaving through the boundary.  The heaviest rung: each flame run
-# is about 35 min on 4 ranks; the case splits into 12 boxes, so up to 12
-# ranks help (NPROCS=12 ./run.sh).
+# release leaving through the boundary.  Eleven variants, about 50 min with
+# NPROCS=12 ./run.sh (the case splits into 12 boxes), roughly three times
+# that on the default 4 ranks.
 set -e
 cd "$(dirname "$0")"
 source ../common.sh

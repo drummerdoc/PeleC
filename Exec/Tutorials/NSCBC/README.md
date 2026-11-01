@@ -23,7 +23,7 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 | [3](03-inflow/README.md) | Subsonic inflow: `relax_u`, forcing (`dudt`) and the NRI register | NSCBC-Acoustic duct | 3 min | ready |
 | [4](04-turbulent-inflow/README.md) | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | 14 min | ready |
 | [5](05-transverse/README.md) | Oblique waves and vortices: the transverse weight β | NSCBC-COVO | 4 min | ready |
-| [6](06-crossing-the-outflow/README.md) | What may cross an outflow: hot fronts and flames; the flame closures | NSCBC-FlameOutflow 2-D | 2½ h | ready |
+| [6](06-crossing-the-outflow/README.md) | What may cross an outflow: hot fronts and flames; the flame closures | NSCBC-FlameOutflow 2-D | 50 min on 12 ranks | ready |
 | [7](07-backflow/README.md) | Flow entering through an outflow: reversal and sustained backflow | NSCBC-Acoustic | 2 min | ready |
 | [8](08-longer-domain/README.md) | When the answer is a longer domain | NSCBC-Chamber 2-D | 2 h on 16 ranks | ready |
 
