@@ -59,7 +59,8 @@ def injection(run):
 
 fig, (ax_s, ax_f) = nt.plt.subplots(1, 2, figsize=(13, 4.4), layout="constrained")
 cols = nt.plt.cm.plasma(np.linspace(0, 0.85, len(KS_STEP)))
-print("(A) step: t_conv = last time |u - target| > 1% of the step")
+print("(A) step: t_conv = last time |u - target| > 1% of the step "
+      "(20 = the end of the run: never settled)")
 for k, col in zip(KS_STEP, cols):
     tt, r = step_response(k)
     ax_s.plot(tt, r, color=col, label=f"relax_u = {k}")

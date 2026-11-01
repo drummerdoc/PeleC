@@ -8,7 +8,7 @@ inject a signal (forcing) through it?
 2000 cm/s stream; the far end imposes the ambient pressure, so it reflects
 everything. That reflecting far end is deliberate: it sends every wave back to
 the inlet, so what you see is the inlet's own behaviour.
-**Cost:** about two minutes on 4 ranks.
+**Cost:** about three minutes on 4 ranks.
 
 ```sh
 ./run.sh
