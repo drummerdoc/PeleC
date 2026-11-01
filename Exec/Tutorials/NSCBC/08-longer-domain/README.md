@@ -20,10 +20,11 @@ and σ = 16:
   air beyond the vent (`prob.charge_end=1.2`), and the same boundary sits at
   its end — three times the cells.
 
-**Cost:** the heaviest rung. On a shared 128-core node each vent run took
-30 minutes on 8 ranks and each plenum run 29 minutes on 24; the grids split
-into 16 and 48 boxes, so give it ranks (`NPROCS=16 ./run.sh`, or run the
-variants side by side).
+**Cost:** the heaviest rung. `NPROCS=16 ./run.sh` takes about two hours,
+build included: about 15 minutes for each vent run and 43 for each plenum
+run (three times the cells). The grids split into 16 and 48 boxes, so more
+ranks help the plenum runs, and the four variants are independent if you
+would rather run them side by side.
 
 ```sh
 ./run.sh

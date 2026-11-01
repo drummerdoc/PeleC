@@ -2,9 +2,9 @@
 # Rung 8: when the answer is a longer domain -- a vented H2/air chamber with
 # its characteristic boundary at the vent, and with the duct extended two
 # chamber lengths (air beyond the vent) so the boundary sits in the far
-# field; each layout at sigma = 0.25 and 16.  The heaviest rung: about half
-# an hour per run on a shared node at 8 (vent) and 24 (plenum) ranks; the
-# grids split into 16 / 48 boxes, so give it ranks (NPROCS=16 ./run.sh).
+# field; each layout at sigma = 0.25 and 16.  The heaviest rung: about two
+# hours with NPROCS=16 ./run.sh (15 min per vent run, 43 per plenum run);
+# the grids split into 16 / 48 boxes.
 set -e
 cd "$(dirname "$0")"
 source ../common.sh
