@@ -9,7 +9,8 @@ two ways for σ = 0, 0.25, 1, 4, 16, and σ = 16 with the NDNR register:
 * **(B)** a uniform 0.1% overpressure at rest: how the outflow returns the
   domain's *mean* pressure to the target, over 40 acoustic transits.
 
-**Cost:** about five minutes on 4 ranks.
+**Cost:** about eleven minutes on 4 ranks, nearly all of it the six
+40-transit ring-downs of (B).
 
 ```sh
 ./run.sh
