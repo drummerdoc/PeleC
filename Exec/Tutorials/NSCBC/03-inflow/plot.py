@@ -22,7 +22,7 @@ REFERENCE = {
     "step_k3": 19.9, "step_k10": 20.0,
     "force_k0.5_plain": 0.223, "force_k2_plain": 1.48, "force_k5_plain": 4.56,
     "force_k0.5_ff": 1.13, "force_k2_ff": 2.34, "force_k5_ff": 5.08,
-    "force_k0.5_ffnri": 0.946, "force_k2_ffnri": 0.938, "force_k5_ffnri": 1.0,
+    "force_k0.5_ffnri": 0.960, "force_k2_ffnri": 0.963, "force_k5_ffnri": 1.01,
 }
 
 

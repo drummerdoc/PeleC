@@ -90,7 +90,7 @@ keeps its schedule `x(0) + V t` (`V = U` inert, `U − S_L` burning).
 | σ = 0.25, eT = 1, β_s = 0 | −8,818 (0.9%) | −250 | on schedule |
 | σ = 16 | +1,561 | +8.5 | on schedule |
 | σ = 16, eT = 1, β_s = 0 | −432 | +8.5 | on schedule |
-| σ = 16, eT = 1, β_s = 0, **NDNR** | **−145,475** (14%) | −33,983 | on schedule, pressure wrecked |
+| σ = 16, eT = 1, β_s = 0, NDNR | −1,062 | −13.7 | on schedule |
 
 * **With all defaults the flame never leaves.** Heat release in the boundary
   cells is sustained dilatation; the relaxation has nowhere to put it, and at
@@ -109,12 +109,12 @@ keeps its schedule `x(0) + V t` (`V = U` inert, `U − S_L` burning).
 * **σ = 16 lets the flame out on its own** (+1,561, 0.15%), and with the
   closures as well it is the quietest characteristic outflow (−432, about
   twice the hard outflow's excursion). It costs the reflection of sound.
-* **Never combine NDNR with a crossing front.** The NDNR register estimates
-  the outgoing wave from `u + p / ρc`, with `ρc` a slow average. The front
-  changes `ρc` at the face by a factor of about 2 while the pressure stays
-  put, so the estimate swings as if a strong wave were leaving, and the boundary
-  pulls the domain 14% below ambient. NDNR is for sound against a steady
-  background (rung 2).
+* **NDNR does no harm while a front crosses, and no good.** The register
+  estimates the outgoing wave from the *deviations* of `u` and `p`, so the
+  front's change of impedance (`ρc` halves across it) does not read as a
+  wave: with NDNR the σ = 16 closures row reads −1,062 against −432 without.
+  Keep it for what it is for — letting sound out of a stiff boundary
+  (rung 2).
 
 ## What crosses, and what to set
 
@@ -124,7 +124,6 @@ keeps its schedule `x(0) + V t` (`V = U` inert, `U − S_L` burning).
 | sound at an angle, vortices, shear | yes, with transverse terms | `beta = 0.5` (0.8 for shallow sound) | 5 |
 | an inert hot or compositional front | only with stiff anchoring | σ ≈ 16, or a hard outflow if no sound must leave | 6A |
 | a flame | yes, with the flame closures or stiff anchoring | eT = 1, β_s = 0; σ = 16 for the quietest exit | 6B |
-| any front, with NDNR on | **no** | `ndnr = 0` | 6 |
 | flow coming *in* | with the reservoir closure | `backflow_material = 1` and `t.T`, `t.Y` | 7 |
 
 The order to try things in, when a structure must leave and the domain
@@ -141,7 +140,7 @@ cannot be longer:
    and leave `extrap_temperature` at 0, which is better at both σ here.
    Only a hot front followed by cold gas is measured; for other jumps (a
    cold slug, a fuel jet) watch the mean pressure as it leaves.
-4. **Never** turn on NDNR or `extrap_material` where fronts cross.
+4. **Never** turn on `extrap_material` where fronts cross.
 5. **Check:** the domain-mean pressure while the front leaves, and the
    fallback report. A `flow reversal` count that keeps growing while a front
    is at the outflow means the boundary is pushing it back — the blocked

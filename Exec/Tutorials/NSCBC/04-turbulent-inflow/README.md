@@ -54,7 +54,7 @@ averaged across the duct and over 1–3 ms. At the first cell:
 | `relax_u = 20`, `relax_t = 0.2` | 0.76 | 0.32 |
 | `relax_u = 2`, `relax_t = 20` | 1.16 | 0.90 |
 | `relax_u = 20`, `relax_t = 20` | **0.93** | **0.90** |
-| `relax_u = 20`, `relax_t = 20`, NRI | 1.40 | 0.90 |
+| `relax_u = 20`, `relax_t = 20`, NRI | 1.39 | 0.90 |
 
 * **The defaults filter a turbulent inflow heavily.** Each component is
   relaxed toward its target at a finite rate — `relax_u c / L` for the
@@ -73,7 +73,7 @@ averaged across the duct and over 1–3 ms. At the first cell:
 * **Do not combine NRI with a turbulent inflow.** The register estimates the
   outgoing acoustic wave from `u + p / ρc` at the inlet, and a convected
   eddy's velocity looks like an outgoing wave to it; half of each eddy is fed
-  back into the target and the normal fluctuation is amplified (1.40). NRI is
+  back into the target and the normal fluctuation is amplified (1.39). NRI is
   for injecting acoustic signals (rung 3); PeleC warns when it is enabled
   together with TurbInflow.
 * The decay downstream is the same in every run: the turbulence decays and

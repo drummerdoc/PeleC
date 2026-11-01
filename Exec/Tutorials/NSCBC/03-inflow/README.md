@@ -59,9 +59,9 @@ enters the duct, divided by the amplitude of the wave you asked for.
 
 | relax_u | relaxation only | + `dudt` feed-forward | + `dudt` + NRI register |
 |---|---|---|---|
-| 0.5 | 0.22 | 1.13 | 0.95 |
-| 2 | 1.48 | 2.34 | 0.94 |
-| 5 | 4.56 | 5.08 | 1.00 |
+| 0.5 | 0.22 | 1.13 | 0.96 |
+| 2 | 1.48 | 2.34 | 0.96 |
+| 5 | 4.56 | 5.08 | 1.01 |
 
 * **Relaxation alone injects the wrong signal at every stiffness.** A
   relaxation is built to hold a mean; asked to follow a moving target it lags
@@ -76,7 +76,7 @@ enters the duct, divided by the amplitude of the wave you asked for.
 
 Measure an inlet by the wave it injects, not by the velocity you see at it.
 The inlet velocity is the injected wave *plus* whatever the domain sends
-back: with exact injection here it oscillates at only 0.59 of `A`, which is
+back: with exact injection here it oscillates at only 0.61 of `A`, which is
 the duct's standing-wave response, not a boundary error.
 
 ## Rules of thumb
@@ -95,7 +95,7 @@ the duct's standing-wave response, not a boundary error.
 
 * Force on resonance: `prob.force_freq=865.1` (with `stop_time=8.08e-3
   amr.plot_per=4.816e-5`). At `relax_u = 2` relaxation alone injects 0.63 of
-  the wave and feed-forward + NRI 0.89 — yet the inlet velocity hardly moves
+  the wave and feed-forward + NRI 0.92 — yet the inlet velocity hardly moves
   in either case (0.8% and 0.5% of `A`): on resonance the inlet sits at a
   velocity node of the duct, so the wave goes in while the velocity there
   stays put.

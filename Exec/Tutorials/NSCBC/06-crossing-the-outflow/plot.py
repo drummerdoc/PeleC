@@ -39,7 +39,7 @@ REFERENCE = {
     "flame_closures": (-8818, -250.3, 0.23),
     "flame_s16_defaults": (1561, 8.5, 0.23),
     "flame_s16_closures": (-432, 8.5, 0.22),
-    "flame_s16_closures_ndnr": (-145475, -33983.4, 0.23),
+    "flame_s16_closures_ndnr": (-1062, -13.7, 0.22),
 }
 
 

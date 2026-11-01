@@ -37,7 +37,7 @@ back over about four acoustic transits; σ = 16 within a sixteenth of one.
 | 1 | 2.9 | 2 × 10⁻³ |
 | 4 | 7.6 | 0.21 — still ringing |
 | 16 | 28 | 0.74 — barely damped |
-| 16 + NDNR | 1.3 | 0.02 |
+| 16 + NDNR | 0.92 | 1 × 10⁻⁴ |
 
 * **σ = 0 is perfectly transparent and perfectly unanchored.** The pulse
   leaves without a trace, but the overpressure in (B) stays forever: nothing
@@ -53,24 +53,23 @@ back over about four acoustic transits; σ = 16 within a sixteenth of one.
   transits, with no overshoot at all.
 * **NDNR (`pelec.bc_nscbc_ndnr = 1`) breaks the trade.** The register keeps a
   slow average of the outgoing wave at each boundary point and the relaxation
-  ignores the wave currently leaving, so even σ = 16 reflects only 1.3% and
-  the ringing is gone: one undershoot (−0.87), one small overshoot (+0.17),
-  and within 1% after 27 transits. For a one-off disturbance like this it is
-  *worse* than σ = 0.25; its use is when the mean must be held tightly
-  while sound keeps leaving — a forced or ringing duct. It is for sound
-  only: the register reads the outgoing wave from `u + p / ρc`, and a hot
-  front or a flame crossing the outflow changes `ρc` enough to look like a
-  strong wave (rung 6 measures a 14% pressure drop). Judge an NDNR run over
-  many transits: the register needs a few of its time constants (6 L/c) to
-  form.
+  ignores the wave currently leaving, so even σ = 16 reflects only 0.9% and
+  the ringing is gone: one swing below the target (−0.99), a +0.01
+  overshoot, and within 1% after 9 transits — sooner than σ = 0.25 (13),
+  though through a full swing that σ = 0.25 never makes. Its use is when the
+  mean must be held tightly while sound keeps leaving — a forced or ringing
+  duct. The register reads the outgoing wave from the *deviations* of
+  `u` and `p`, so a hot front or a flame crossing the outflow does not fool
+  it (rung 6). Judge an NDNR run over many transits: the register needs a few
+  of its time constants (6 L/c) to form.
 
 ## Rules of thumb
 
 * Start at σ = 0.25. Check two time scales: τ_relax = L / (σ c) must be well
   above an acoustic transit (or waves reflect) and well below the run time
   (or the mean drifts). PeleC prints τ_relax in transits at startup.
-* If the mean must be held tightly and only sound crosses the outflow,
-  raise σ **with** `bc_nscbc_ndnr = 1`, not instead of it.
+* If the mean must be held tightly, raise σ **with** `bc_nscbc_ndnr = 1`,
+  not instead of it.
 * A boundary that rings or reflects at every reasonable σ is usually sitting
   on something it cannot handle — rungs 5–7.
 

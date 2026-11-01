@@ -79,7 +79,7 @@ The same duct, for :math:`\sigma` from 0 to 16: the reflection of a pulse (left)
 overpressure to the target (right). :math:`\sigma = 0` is perfectly transparent and never anchors; raising
 :math:`\sigma` anchors faster and reflects more (27.5% at 16), and from :math:`\sigma \approx 4` the duct rings.
 The default 0.25 reflects under 1% and returns the mean without overshoot. The NDNR register breaks the trade
-for sound (1.3% at :math:`\sigma = 16`) but must not be used where fronts cross (rung 6).
+for sound: 0.9% at :math:`\sigma = 16`, and the mean back within 1% in 9 transits.
 
 Rung 3 — the subsonic inflow
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -132,8 +132,8 @@ The flame closures (``extrap_temperature = 1``, ``beta_s = 0``) let it out on sc
 with a 0.9% dip; :math:`\sigma = 16` lets it out alone (0.15%), and with the closures has about twice a hard
 outflow's excursion. An inert hot
 front needs stiff anchoring instead (:math:`\sigma \approx 16`): at :math:`\sigma = 0.25` the defaults leave a 2%
-excursion and ``extrap_temperature = 1`` alone over-vents (−7.7%). The NDNR register reads a crossing front as a
-strong wave and drops the pressure 14%.
+excursion and ``extrap_temperature = 1`` alone over-vents (−7.7%). NDNR does no harm while a front crosses
+(−1,062 at :math:`\sigma = 16` with the closures, against −432 without).
 
 .. list-table::
    :header-rows: 1
@@ -153,9 +153,6 @@ strong wave and drops the pressure 14%.
      - 6
    * - a flame
      - ``extrap_temperature = 1``, ``beta_s = 0``
-     - 6
-   * - any front, with NDNR on
-     - not supported: ``ndnr = 0``
      - 6
    * - flow coming *in*
      - ``backflow_material = 1`` with ``t.T``, ``t.Y`` in the target
