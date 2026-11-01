@@ -25,4 +25,4 @@ for s in 0 0.25 1 4 16; do
 done
 run_variant ring_s16_ndnr "$INP" pelec.bc_nscbc_sigma=16 \
   pelec.bc_nscbc_ndnr=1 $RING
-echo "now: python plot.py"
+echo "now: python3 plot.py"

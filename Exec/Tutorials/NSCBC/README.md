@@ -32,16 +32,22 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 ```sh
 cd 01-outflow-pulse
 ./run.sh            # builds the case it needs, runs every variant into runs/
-python plot.py      # writes the figure here and prints measured vs reference
+python3 plot.py     # writes the figure here and prints measured vs reference
 ```
 
 `run.sh` skips any variant that already finished; delete its directory under
-`runs/` to rerun it. Environment knobs (see `common.sh`): `USE_MPI`
-(default `TRUE`), `NPROCS` (default 4), `MAKE_JOBS`, `MPIEXEC`, `PELE_HOME`.
+`runs/` to rerun it. The first rung to use a case also builds it, the
+PelePhysics third-party libraries included, which adds a few minutes to its
+cost (two on a many-core node with the default `MAKE_JOBS=8`); later rungs
+on the same case reuse the build. Environment knobs (see `common.sh`):
+`USE_MPI` (default `TRUE`), `NPROCS` (default 4), `MAKE_JOBS`, `MPIEXEC`,
+`PELE_HOME`.
 
-Prerequisites: a working PeleC build environment (the cases build with
-GNU make), MPI, and Python 3 with `numpy` and `matplotlib`. The plot scripts
-read the plotfiles directly; no other package is needed.
+Prerequisites: a PeleC checkout with its submodules (`git clone --recursive`,
+or `git submodule update --init --recursive` in an existing one), a working
+build environment (the cases build with GNU make), MPI, and Python 3 with
+`numpy` and `matplotlib`. The plot scripts read the plotfiles directly; no
+other package is needed.
 
 If a run's log ends with a segmentation fault *after* `AMReX ... finalized`,
 the run itself completed: PelePhysics older than 47f5969 (PelePhysics #699)

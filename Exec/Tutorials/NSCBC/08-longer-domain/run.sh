@@ -24,4 +24,4 @@ run_variant vent_s16 "$CASE_DIR/chamber-vent.inp" $C pelec.bc_nscbc_sigma=16
 run_variant plenum "$CASE_DIR/chamber-plenum.inp" $C prob.charge_end=1.2
 run_variant plenum_s16 "$CASE_DIR/chamber-plenum.inp" $C prob.charge_end=1.2 \
   pelec.bc_nscbc_sigma=16
-echo "now: python plot.py"
+echo "now: python3 plot.py"

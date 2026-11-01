@@ -10,7 +10,7 @@ wall at `x = 0`, outflow at `x = 10 cm`, periodic in `y`.
 
 ```sh
 ./run.sh            # builds the case, runs both variants into runs/
-python plot.py      # writes outflow_pulse.png, prints R against the reference
+python3 plot.py     # writes outflow_pulse.png, prints R against the reference
 ```
 
 ![Rung 1](../../../../Docs/sphinx/images/nscbc_tutorial/01_outflow_pulse.png)

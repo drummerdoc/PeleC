@@ -17,4 +17,4 @@ FLUSH="prob.pulse_type=1 prob.amp=0.0 prob.T_init=600.0
   amr.data_log=datlog pelec.sum_interval=20"
 run_variant frozen "$INP" $FLUSH pelec.bc_nscbc_backflow_material=0
 run_variant reservoir "$INP" $FLUSH pelec.bc_nscbc_backflow_material=1
-echo "now: python plot.py"
+echo "now: python3 plot.py"

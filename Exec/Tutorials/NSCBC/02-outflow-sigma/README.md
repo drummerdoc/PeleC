@@ -13,7 +13,7 @@ two ways for σ = 0, 0.25, 1, 4, 16, and σ = 16 with the NDNR register:
 
 ```sh
 ./run.sh
-python plot.py      # writes outflow_sigma.png, prints both numbers per variant
+python3 plot.py     # writes outflow_sigma.png, prints both numbers per variant
 ```
 
 ![Rung 2](../../../../Docs/sphinx/images/nscbc_tutorial/02_outflow_sigma.png)

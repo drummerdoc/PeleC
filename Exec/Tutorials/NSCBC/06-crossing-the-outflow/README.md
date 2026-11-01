@@ -25,7 +25,7 @@ another, about 2½ hours on 4 ranks. The case splits into 12 boxes, so
 
 ```sh
 ./run.sh
-python plot.py      # writes crossing.png, prints the three measures per run
+python3 plot.py     # writes crossing.png, prints the three measures per run
 ```
 
 ![Rung 6](../../../../Docs/sphinx/images/nscbc_tutorial/06_crossing.png)

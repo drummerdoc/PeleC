@@ -12,4 +12,4 @@ OUT="amr.plot_int=20 amr.derive_plot_vars=pressure x_velocity"
 
 run_variant hard "$INP" pelec.bc_nscbc=0 $OUT
 run_variant nscbc "$INP" pelec.bc_nscbc=1 pelec.bc_nscbc_sigma=0.25 $OUT
-echo "now: python plot.py"
+echo "now: python3 plot.py"

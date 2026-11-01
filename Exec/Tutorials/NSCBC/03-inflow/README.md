@@ -12,7 +12,7 @@ the inlet, so what you see is the inlet's own behaviour.
 
 ```sh
 ./run.sh
-python plot.py      # writes inflow.png, prints both measures per variant
+python3 plot.py     # writes inflow.png, prints both measures per variant
 ```
 
 ![Rung 3](../../../../Docs/sphinx/images/nscbc_tutorial/03_inflow.png)

@@ -29,4 +29,4 @@ for k in 0.5 2 5; do
   run_variant force_k${k}_ffnri "$INP" pelec.bc_nscbc_relax_u=$k $FORCE \
     prob.force_feedforward=1 pelec.bc_nscbc_nri=1
 done
-echo "now: python plot.py"
+echo "now: python3 plot.py"

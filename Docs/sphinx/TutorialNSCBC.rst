@@ -19,10 +19,11 @@ Each rung has a ``README.md`` with the full walk-through; what follows is the su
 
    cd Exec/Tutorials/NSCBC/01-outflow-pulse
    ./run.sh            # builds the case it needs, runs every variant into runs/
-   python plot.py      # writes the figure and prints measured against reference
+   python3 plot.py     # writes the figure and prints measured against reference
 
-Prerequisites: a PeleC build environment, MPI, and Python 3 with ``numpy`` and ``matplotlib``. ``run.sh`` skips
-variants that already finished; ``NPROCS`` (default 4) sets the ranks. Pressures are in dyn/cm²; the target is
+Prerequisites: a PeleC checkout with its submodules, a build environment, MPI, and Python 3 with ``numpy`` and
+``matplotlib``. ``run.sh`` skips variants that already finished, and the first rung to use a case also builds it;
+``NPROCS`` (default 4) sets the ranks. Pressures are in dyn/cm²; the target is
 1 atm = 1.01325 × 10⁶.
 
 .. list-table::

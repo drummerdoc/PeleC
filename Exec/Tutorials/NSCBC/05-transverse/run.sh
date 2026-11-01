@@ -26,4 +26,4 @@ done
 run_variant covo_periodic "$COVO" pelec.bc_nscbc=0 amr.plot_int=3000 \
   geometry.is_periodic="1 1" pelec.lo_bc="Interior Interior" \
   pelec.hi_bc="Interior Interior"
-echo "now: python plot.py"
+echo "now: python3 plot.py"

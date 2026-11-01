@@ -11,7 +11,7 @@ homogeneous isotropic turbulence box: u' = 100 cm/s (5%), eddies about 0.5 cm.
 
 ```sh
 ./run.sh            # makes the turbulence box, builds 3-D, runs five variants
-python plot.py      # writes turbulent_inflow.png, prints the inlet fractions
+python3 plot.py     # writes turbulent_inflow.png, prints the inlet fractions
 ```
 
 ![Rung 4](../../../../Docs/sphinx/images/nscbc_tutorial/04_turbulent_inflow.png)

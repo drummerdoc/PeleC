@@ -36,4 +36,4 @@ run_variant flame_s16_defaults "$INP" $C $DEFAULTS pelec.bc_nscbc_sigma=16
 run_variant flame_s16_closures "$INP" $C $CLOSURES pelec.bc_nscbc_sigma=16
 run_variant flame_s16_closures_ndnr "$INP" $C $CLOSURES \
   pelec.bc_nscbc_sigma=16 pelec.bc_nscbc_ndnr=1
-echo "now: python plot.py"
+echo "now: python3 plot.py"

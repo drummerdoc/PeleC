@@ -16,7 +16,7 @@ check C14.
 
 ```sh
 ./run.sh
-python plot.py      # writes backflow.png, prints the 30 ms state
+python3 plot.py     # writes backflow.png, prints the 30 ms state
 ```
 
 ![Rung 7](../../../../Docs/sphinx/images/nscbc_tutorial/07_backflow.png)

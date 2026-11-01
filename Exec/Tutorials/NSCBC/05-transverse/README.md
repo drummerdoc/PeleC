@@ -17,7 +17,7 @@ vortex rather than a sound wave crosses it — and how should β be set?
 
 ```sh
 ./run.sh
-python plot.py      # writes transverse.png, prints both measures per variant
+python3 plot.py     # writes transverse.png, prints both measures per variant
 ```
 
 ![Rung 5](../../../../Docs/sphinx/images/nscbc_tutorial/05_transverse.png)

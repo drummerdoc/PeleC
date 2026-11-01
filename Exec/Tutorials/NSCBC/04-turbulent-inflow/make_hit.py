@@ -2,7 +2,7 @@
 the text format of PelePhysics' Support/TurbInflowGenerator/gen_hit_ic.py
 (cell centres on [0, 2 pi]^3, Fortran order, u_rms = 1), from numpy alone.
 
-    python make_hit.py <N> <k0> <outfile>
+    python3 make_hit.py <N> <k0> <outfile>
 
 Divergence-free random Fourier modes with a Passot-Pouquet spectrum
 E(k) ~ k^4 exp(-2 k^2 / k0^2), peaked at wavenumber k0.  The seed is fixed,

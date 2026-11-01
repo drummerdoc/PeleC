@@ -27,7 +27,7 @@ variants side by side).
 
 ```sh
 ./run.sh
-python plot.py      # writes longer_domain.png, prints the measures per run
+python3 plot.py     # writes longer_domain.png, prints the measures per run
 ```
 
 ![Rung 8](../../../../Docs/sphinx/images/nscbc_tutorial/08_longer_domain.png)

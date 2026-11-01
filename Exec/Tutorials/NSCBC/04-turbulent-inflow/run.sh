@@ -26,4 +26,4 @@ run_variant t20 "$INP" pelec.bc_nscbc_relax_u=2 pelec.bc_nscbc_relax_t=20
 run_variant ut20 "$INP" pelec.bc_nscbc_relax_u=20 pelec.bc_nscbc_relax_t=20
 run_variant ut20_nri "$INP" pelec.bc_nscbc_relax_u=20 \
   pelec.bc_nscbc_relax_t=20 pelec.bc_nscbc_nri=1
-echo "now: python plot.py"
+echo "now: python3 plot.py"
