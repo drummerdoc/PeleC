@@ -23,7 +23,7 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 | [3](03-inflow/README.md) | Subsonic inflow: `relax_u`, forcing (`dudt`) and the NRI register | NSCBC-Acoustic duct | 2 min | ready |
 | [4](04-turbulent-inflow/README.md) | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | 8 min | ready |
 | [5](05-transverse/README.md) | Oblique waves and vortices: the transverse weight β | NSCBC-COVO | 4 min | ready |
-| 6 | What may cross an outflow: vortices, entropy and composition fronts, flames; the flame closures | NSCBC-COVO, NSCBC-FlameOutflow | — | planned |
+| [6](06-crossing-the-outflow/README.md) | What may cross an outflow: hot fronts and flames; the flame closures | NSCBC-FlameOutflow 2-D | 2½ h | ready |
 | [7](07-backflow/README.md) | Flow entering through an outflow: reversal and sustained backflow | NSCBC-Acoustic | 2 min | ready |
 | 8 | When the answer is a longer domain | NSCBC-FlameOutflow, NSCBC-Chamber | — | planned |
 
@@ -44,9 +44,9 @@ GNU make), MPI, and Python 3 with `numpy` and `matplotlib`. The plot scripts
 read the plotfiles directly; no other package is needed.
 
 If a run's log ends with a segmentation fault *after* `AMReX ... finalized`,
-the run itself completed: some compilers (seen with GCC 15) crash in a
-PelePhysics static destructor at exit. `run.sh` judges success from the
-log, not the exit code.
+the run itself completed: PelePhysics older than 47f5969 (PelePhysics #699)
+can crash in a static destructor at exit (seen with GCC 15). `run.sh` judges
+success from the log, not the exit code.
 
 ## Conventions
 

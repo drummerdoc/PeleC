@@ -57,17 +57,20 @@ back over about four acoustic transits; σ = 16 within a sixteenth of one.
   the ringing is gone: one undershoot (−0.87), one small overshoot (+0.17),
   and within 1% after 27 transits. For a one-off disturbance like this it is
   *worse* than σ = 0.25; its use is when the mean must be held tightly
-  against something that keeps pushing it — heat release near the outflow,
-  a forced duct (rung 6). Judge an NDNR run over many transits: the register
-  needs a few of its time constants (6 L/c) to form.
+  while sound keeps leaving — a forced or ringing duct. It is for sound
+  only: the register reads the outgoing wave from `u + p / ρc`, and a hot
+  front or a flame crossing the outflow changes `ρc` enough to look like a
+  strong wave (rung 6 measures a 14% pressure drop). Judge an NDNR run over
+  many transits: the register needs a few of its time constants (6 L/c) to
+  form.
 
 ## Rules of thumb
 
 * Start at σ = 0.25. Check two time scales: τ_relax = L / (σ c) must be well
   above an acoustic transit (or waves reflect) and well below the run time
   (or the mean drifts). PeleC prints τ_relax in transits at startup.
-* If the mean must be held tightly, raise σ **with** `bc_nscbc_ndnr = 1`,
-  not instead of it.
+* If the mean must be held tightly and only sound crosses the outflow,
+  raise σ **with** `bc_nscbc_ndnr = 1`, not instead of it.
 * A boundary that rings or reflects at every reasonable σ is usually sitting
   on something it cannot handle — rungs 5–7.
 

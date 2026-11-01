@@ -53,6 +53,7 @@ counted as a wave), divided by the pulse amplitude.
   the mean pressure at the target; rung 2 shows what that costs.
 * `pelec.bc_nscbc_order = 1` (first-order extrapolation of the outgoing
   invariant): R = 0.79%, no better or worse for a smooth pulse. The order
-  matters for structure crossing the boundary, not for acoustics (rung 6).
+  matters for structure crossing the boundary, not for acoustics (the
+  `NSCBC-FlameOutflow` case README measures it on a flame).
 
 To rerun a variant after changing it, delete its directory under `runs/`.
