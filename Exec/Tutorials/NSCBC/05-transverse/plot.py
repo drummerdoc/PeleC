@@ -70,8 +70,8 @@ for tag, label in PULSE:
     if tag in ("hard", "b0.8"):
         a = ax[{"hard": "ph", "b0.8": "p8"}[tag]]
         lim = 1.0e-4 * nt.P_AMB
-        a.pcolormesh(d["x"], d["y"], dp.T, cmap="RdBu_r", vmin=-lim, vmax=lim,
-                     shading="auto")
+        im_a = a.pcolormesh(d["x"], d["y"], dp.T, cmap="RdBu_r", vmin=-lim,
+                            vmax=lim, shading="auto")
         a.set_aspect("equal")
         a.set_title(f"(A) pulse front, {label}")
         a.set_xticks([])
@@ -100,8 +100,8 @@ for tag, key in [("b1.0", "v1"), ("b0.5", "v5")]:
                 ["pressure"])
     dp = d["pressure"] - nt.P_AMB
     lim = lim or np.abs(dp).max()
-    ax[key].pcolormesh(d["x"], d["y"], dp.T, cmap="RdBu_r", vmin=-lim,
-                       vmax=lim, shading="auto")
+    im_b = ax[key].pcolormesh(d["x"], d["y"], dp.T, cmap="RdBu_r", vmin=-lim,
+                              vmax=lim, shading="auto")
     ax[key].set_aspect("equal")
     ax[key].set_xticks([])
     ax[key].set_yticks([])
@@ -127,5 +127,10 @@ ax["B"].set_xticks(range(len(COVO)), [p[1] for p in COVO])
 ax["B"].set_ylabel("residual / no-boundary floor")
 ax["B"].set_title("residual after the vortex has left")
 for i, r in enumerate(res):
-    ax["B"].text(i, r * 1.15, f"{r:.2g}x", ha="center", fontsize=8)
+    ax["B"].text(i, r * 1.15, f"{r:.2g}x" if r < 100 else f"{r:.0f}x",
+                 ha="center", fontsize=8)
+fig.colorbar(im_a, ax=[ax["ph"], ax["p8"]], shrink=0.8,
+             label="p − p_amb [dyn/cm²] (one scale)")
+fig.colorbar(im_b, ax=[ax["v1"], ax["v5"]], shrink=0.8,
+             label="p − p_amb [dyn/cm²] (one scale)")
 nt.save(fig, "transverse.png")
