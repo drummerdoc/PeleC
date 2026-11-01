@@ -7,7 +7,8 @@ the domain through a characteristic inlet, and which settings control it?
 duct, periodic across, 64 × 16 × 16 cells, mean flow 2000 cm/s (M ≈ 0.06).
 The inlet carries PelePhysics TurbInflow fluctuations from a synthetic
 homogeneous isotropic turbulence box: u' = 100 cm/s (5%), eddies about 0.5 cm.
-**Cost:** about eight minutes on 4 ranks, including the 3-D build.
+**Cost:** about fourteen minutes on 4 ranks: two for the turbulence box and
+the 3-D build, then about 2½ minutes for each of the five runs.
 
 ```sh
 ./run.sh            # makes the turbulence box, builds 3-D, runs five variants

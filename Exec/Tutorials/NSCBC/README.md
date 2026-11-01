@@ -21,7 +21,7 @@ PeleC documentation; this tutorial is the hands-on companion to it.
 | [1](01-outflow-pulse/README.md) | Why a characteristic outflow? | NSCBC-Acoustic 2-D | 1 min | ready |
 | [2](02-outflow-sigma/README.md) | σ: letting waves out against holding the mean | NSCBC-Acoustic 2-D | 11 min | ready |
 | [3](03-inflow/README.md) | Subsonic inflow: `relax_u`, forcing (`dudt`) and the NRI register | NSCBC-Acoustic duct | 3 min | ready |
-| [4](04-turbulent-inflow/README.md) | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | 8 min | ready |
+| [4](04-turbulent-inflow/README.md) | A turbulent inflow through the characteristic inlet | NSCBC-Acoustic 3-D duct + TurbInflow | 14 min | ready |
 | [5](05-transverse/README.md) | Oblique waves and vortices: the transverse weight β | NSCBC-COVO | 4 min | ready |
 | [6](06-crossing-the-outflow/README.md) | What may cross an outflow: hot fronts and flames; the flame closures | NSCBC-FlameOutflow 2-D | 2½ h | ready |
 | [7](07-backflow/README.md) | Flow entering through an outflow: reversal and sustained backflow | NSCBC-Acoustic | 2 min | ready |
